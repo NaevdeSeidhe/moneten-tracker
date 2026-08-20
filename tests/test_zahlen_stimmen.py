@@ -56,10 +56,10 @@ def _konto(db: Session, name: str = "Probe") -> Account:
 def test_monatszahlen_zaehlen_die_zukunft_nicht_mit(db_session: Session) -> None:
     """Ein vorerfasster Dauerauftrag und ein Jahres-Tippfehler dürfen nicht mitzählen.
 
-    Gemessen im Ausgangszustand: die Leitzahl meldete für August 2026 einen
-    Saldo von 7'472.00, weil eine Buchung vom 10.09. und eine 
-    mitgerechnet wurden. Richtig sind −1'750.00. Ein Tippfehler im Jahr wurde so
-    zur grössten „Einnahme" des Monats.
+    Gemessen im Ausgangszustand: die Leitzahl zählte eine Buchung des Folgemonats
+    und eine mit falschem Jahr zum laufenden Monat und meldete darum einen
+    Überschuss, wo in Wirklichkeit ein Minus stand. Ein Tippfehler im Jahr wurde
+    so zur grössten „Einnahme" des Monats.
     """
     from moneten.routers.dashboard import _month_totals
 
