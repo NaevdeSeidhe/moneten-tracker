@@ -50,3 +50,50 @@ def test_der_dienst_selbst_haelt_die_grenze_auch_ein() -> None:
             jobs.start_scan_job(b"x", ".jpg", bild_speichern=None)
     finally:
         jobs._SCANS.clear()
+
+
+def test_ein_haengender_auftrag_gibt_seinen_platz_wieder_frei() -> None:
+    """Sonst genügt ein Hänger, um einen der vier Plätze für immer zu belegen.
+
+    Die Erkennung läuft in einem Thread, den niemand abbrechen kann. Hängt sie
+    — verklemmter Unterprozess, Modell in einer Schleife —, bleibt der Auftrag
+    auf „läuft". Vier solche Fälle, und die App nimmt keinen Beleg mehr an,
+    ohne dass irgendwo steht, warum. Der Thread darf weiterlaufen; was er nicht
+    darf, ist einen Platz blockieren.
+    """
+    import time
+
+    from moneten.services import jobs
+
+    jobs._SCANS.clear()
+    try:
+        jobs._SCANS["haenger"] = {
+            "zustand": "laeuft", "ocr": None, "bild": None, "fehler": "",
+            "begonnen": time.monotonic() - jobs._HOECHSTDAUER_SEKUNDEN - 1,
+        }
+        jobs._SCANS["frisch"] = {
+            "zustand": "laeuft", "ocr": None, "bild": None, "fehler": "",
+            "begonnen": time.monotonic(),
+        }
+
+        assert jobs.offene_scans() == 1, "Der Hänger zählt weiter als offen"
+        assert jobs._SCANS["haenger"]["zustand"] == "fehler"
+        assert "Zeit" in jobs._SCANS["haenger"]["fehler"]
+        assert jobs._SCANS["frisch"]["zustand"] == "laeuft", "Der frische wurde mitgerissen"
+    finally:
+        jobs._SCANS.clear()
+
+
+def test_die_erkennung_hat_eine_frist() -> None:
+    """Ohne ``timeout=`` wartet ``communicate()`` unbegrenzt auf Tesseract."""
+    from pathlib import Path
+
+    quelle = (Path(__file__).resolve().parents[1] / "src/moneten/services/receipt_ocr.py").read_text(
+        encoding="utf-8"
+    )
+    aufrufe = [z for z in quelle.splitlines() if "image_to_string(" in z]
+    assert aufrufe, "Keine Tesseract-Aufrufe gefunden — Test veraltet?"
+    ohne_frist = [z.strip() for z in aufrufe if "timeout" not in z]
+    # Mehrzeilige Aufrufe: die Frist darf auch in der Folgezeile stehen.
+    ohne_frist = [z for z in ohne_frist if not z.endswith("(")]
+    assert not ohne_frist, f"Tesseract-Aufruf ohne Frist: {ohne_frist}"

@@ -704,12 +704,20 @@ def _run_tesseract(image) -> str:
     Sprach-Fallback auf die Default-Sprache, wenn das deu-Modell fehlt."""
     import pytesseract
 
+    #: Frist je Tesseract-Aufruf. Ohne sie wartet ``communicate()`` unbegrenzt:
+    #: bleibt der Unterprozess haengen (beschaedigtes Bild, verklemmtes Modell),
+    #: haengt der ganze Auftrag — und er belegt bis zum Neustart des Containers
+    #: einen der Plaetze, die begrenzen, wie viele Belege gleichzeitig gehen.
+    #: 180 Sekunden sind grosszuegig: eine Handy-Aufnahme braucht auf dem NAS
+    #: einige Sekunden, ein mehrseitiges PDF selten mehr als eine Minute.
+    frist = 180
+
     def attempt(cfg: str) -> str:
         try:
-            return pytesseract.image_to_string(image, lang=_ocr_lang(), config=cfg)
+            return pytesseract.image_to_string(image, lang=_ocr_lang(), config=cfg, timeout=frist)
         except pytesseract.TesseractError:
             try:
-                return pytesseract.image_to_string(image, config=cfg)  # ohne deu-Modell
+                return pytesseract.image_to_string(image, config=cfg, timeout=frist)  # ohne deu-Modell
             except Exception:
                 return ""
         except Exception:
@@ -757,7 +765,8 @@ def _ocr_diagnostics(image) -> str:
             continue
         for cfg in ("--psm 6 -c preserve_interword_spaces=1", ""):
             try:
-                t = pytesseract.image_to_string(prepped, lang=_ocr_lang(), config=cfg).strip()
+                t = pytesseract.image_to_string(
+                    prepped, lang=_ocr_lang(), config=cfg, timeout=180).strip()
                 out.append(f"{label} | cfg={cfg or 'default'} | {len(t)} Zeichen | {t[:60]!r}")
             except Exception as e:  # noqa: BLE001
                 out.append(f"{label} | cfg={cfg or 'default'} | FEHLER {e!r}")

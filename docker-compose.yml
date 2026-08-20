@@ -60,7 +60,7 @@ services:
     #
     # **cap_drop/cap_add.** Docker gibt jedem Container ein gutes Dutzend
     # Faehigkeiten mit, von denen dieser Dienst keine braucht. Gebraucht werden
-    # vier, alle nur beim Start: CHOWN/FOWNER/DAC_OVERRIDE, um den Datenordner
+    # fuenf, alle nur beim Start: CHOWN/FOWNER/DAC_OVERRIDE, um den Datenordner
     # zu uebereignen, SETUID/SETGID, um die Rechte danach abzugeben.
     #
     # **Wenn der Container nicht startet:** beide Bloecke auskommentieren,

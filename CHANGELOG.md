@@ -3,6 +3,12 @@
 Grobe Übersicht, eine Zeile je Sache. Die ausführliche Entwicklungs-Historie
 gehört nicht hierher.
 
+## 0.82.2
+
+- Haengende Beleg-Erkennungen blockieren keine Plaetze mehr
+- Ohne Reverse-Proxy wird X-Forwarded-For nicht mehr ausgewertet
+- Manifest und Symbole werden bei einer neuen Fassung wieder geladen
+
 ## 0.82.1
 
 - Passkey-Anlegen: Challenge an ihren Zweck gebunden

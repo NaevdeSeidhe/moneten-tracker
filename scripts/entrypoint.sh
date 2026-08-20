@@ -105,6 +105,23 @@ echo "[moneten] Server starten auf 0.0.0.0:8000 ..."
 #
 # Ein falsch gesetzter Wert ist dagegen teuer — das Schema fällt auf http
 # zurück, und angelegte Passkeys passen nicht mehr. Erklärung in ``.env.example``.
+# **MONETEN_PROXY_HOPS=0 heisst: kein Proxy davor — dann darf uvicorn die
+# Absenderadresse auch nicht aus X-Forwarded-For nehmen.**
+#
+# Vorher stand hier unbedingt ``--proxy-headers --forwarded-allow-ips="*"``.
+# Damit ersetzt uvicorn ``request.client.host`` durch den ERSTEN Eintrag der
+# Kopfzeile — und den setzt der Klopfende selbst. Die Drossel sieht bei
+# ``hops=0`` bewusst nicht in die Kopfzeile, bekam aber trotzdem einen vom
+# Klopfenden gewaehlten Wert: pro erfundener Adresse ein eigener Zaehler.
+# Die Zusage „mit 0 wird die Kopfzeile gar nicht angesehen" stimmte also nur
+# im Programm, nicht in der Anlage darum herum.
+#
+# Ohne Proxy ist die einzige ehrliche Quelle die Adresse der Verbindung selbst.
+if [ "${MONETEN_PROXY_HOPS:-1}" = "0" ]; then
+    echo "[moneten] MONETEN_PROXY_HOPS=0 — X-Forwarded-For wird nicht ausgewertet."
+    exec uvicorn moneten.main:app --host 0.0.0.0 --port 8000
+fi
+
 exec uvicorn moneten.main:app \
     --host 0.0.0.0 \
     --port 8000 \

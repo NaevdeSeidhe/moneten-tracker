@@ -14,13 +14,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="{{ 'dark' if _t.dark else 'light' }}">
   <title>{% block title %}Moneten-Tracker{% endblock %}</title>
-  <link rel="icon" type="image/png" href="/static/img/logo.png">
-  <link rel="icon" type="image/png" sizes="32x32" href="/static/img/icon-32.png">
+  <link rel="icon" type="image/png" href="/static/img/logo.png?v={{ statik_v }}">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/img/icon-32.png?v={{ statik_v }}">
 
   <!-- PWA: Manifest + Icons → „Zum Startbildschirm hinzufügen" zeigt das Logo
        (statt eines generischen Buchstabens) und nennt die App „Moneten". -->
-  <link rel="manifest" href="/static/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/static/img/icon-180.png">
+  <link rel="manifest" href="/static/manifest.webmanifest?v={{ statik_v }}">
+  <link rel="apple-touch-icon" href="/static/img/icon-180.png?v={{ statik_v }}">
   {# Statusleisten-Farbe der PWA dem aktiven Skin nachführen (gleicher Ausdruck
      wie das Inline-style oben); app.js schreibt sie beim Theme-Wechsel nach. #}
   <meta name="theme-color" content="{{ _t.bg }}">

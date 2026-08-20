@@ -13,6 +13,7 @@ Job-Status liegt im Speicher (Single-User, eine Instanz) — kein Persistenz-Bed
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 from typing import Any
 
@@ -190,8 +191,42 @@ class ZuVieleScans(RuntimeError):
     """Es stehen schon genug Erkennungen an."""
 
 
+#: Nach dieser Zeit gilt ein Auftrag als verloren.
+#:
+#: Die Plaetze sind begrenzt (siehe MAX_OFFENE_SCANS). Ohne diese Frist genuegt
+#: EIN haengender Auftrag, um einen Platz bis zum Neustart des Containers zu
+#: belegen — vier davon, und die App nimmt keinen Beleg mehr an, ohne dass
+#: irgendwo etwas dazu steht. Haengen kann es an Stellen, die wir nicht in der
+#: Hand haben: ein Unterprozess, der nicht zurueckkommt, ein Modell, das sich
+#: verklemmt.
+#:
+#: Zehn Minuten sind reichlich: die Erkennung selbst hat eine Frist von drei
+#: Minuten je Aufruf, und mehr als zwei laufen nie gleichzeitig.
+_HOECHSTDAUER_SEKUNDEN = 600
+
+
+def _verlorene_aufgeben() -> None:
+    """Haengende Auftraege als gescheitert markieren — sie geben den Platz frei.
+
+    Der Thread laeuft womoeglich weiter; kommt er doch noch zurueck, schreibt er
+    sein Ergebnis und der Nutzer kann es abholen. Was er nicht mehr tut, ist
+    einen Platz zu blockieren.
+    """
+    jetzt = time.monotonic()
+    for eintrag in _SCANS.values():
+        if eintrag["zustand"] != "laeuft":
+            continue
+        begonnen = eintrag.get("begonnen")
+        if begonnen is not None and jetzt - begonnen > _HOECHSTDAUER_SEKUNDEN:
+            eintrag.update(
+                zustand="fehler",
+                fehler="Zeitüberschreitung — die Erkennung hat nicht geantwortet.",
+            )
+
+
 def offene_scans() -> int:
     """Wie viele Erkennungen gerade laufen oder warten."""
+    _verlorene_aufgeben()
     return sum(1 for v in _SCANS.values() if v["zustand"] == "laeuft")
 
 
@@ -219,7 +254,8 @@ def start_scan_job(data: bytes, suffix: str, *, bild_speichern) -> str:
     if offene_scans() >= MAX_OFFENE_SCANS:
         raise ZuVieleScans(f"Es laufen bereits {offene_scans()} Erkennungen.")
     jid = uuid.uuid4().hex[:12]
-    _SCANS[jid] = {"zustand": "laeuft", "ocr": None, "bild": None, "fehler": ""}
+    _SCANS[jid] = {"zustand": "laeuft", "ocr": None, "bild": None, "fehler": "",
+                   "begonnen": time.monotonic()}
 
     def arbeiten() -> None:
         try:
