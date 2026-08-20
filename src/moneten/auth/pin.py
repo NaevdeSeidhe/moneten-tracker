@@ -141,10 +141,18 @@ def refresh_session(request: Request, response: Response) -> None:
 
 def clear_session(response: Response) -> None:
     """Löscht das Session-Cookie."""
+    # **Mit denselben Eigenschaften löschen, mit denen gesetzt wurde.** Ein
+    # ``__Host-``-Cookie nimmt der Browser nur mit ``Secure`` an — auch das
+    # Lösch-Cookie. Ohne das Flag verwirft er die Löschung stillschweigend, und
+    # die Sitzung überlebt das Abmelden.
+    #
     # Beide Namen: nach einem Wechsel zwischen Betrieb und Entwicklung liegt
     # sonst noch das Cookie unter dem anderen Namen im Browser.
-    response.delete_cookie(cookie_name(), path="/")
-    response.delete_cookie(settings.session_cookie_name, path="/")
+    for name in (cookie_name(), settings.session_cookie_name):
+        response.delete_cookie(
+            name, path="/", httponly=True,
+            secure=not settings.dev_mode, samesite="lax",
+        )
 
 
 def _read_session(request: Request) -> tuple[int, str] | None:

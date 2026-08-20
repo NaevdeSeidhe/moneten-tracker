@@ -80,8 +80,19 @@ class _OhneGesundeHealthchecks(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        text = record.getMessage()
-        return not ("/health" in text and " 200 " in text)
+        # **Über die Argumente, nicht über den fertigen Satz.** Die Zeile lautet
+        # ``… - "GET /health HTTP/1.1" 200`` — die Statuszahl steht am ENDE.
+        # Ein Muster wie ``" 200 "`` trifft dort nie, und der Filter liess
+        # jahrelang alles durch, was er wegzunehmen versprach. Uvicorn übergibt
+        # die Bestandteile einzeln: (Absender, Methode, Pfad, HTTP-Fassung,
+        # Status).
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 5:
+            pfad, status = args[2], args[4]
+            gesund = isinstance(pfad, str) and pfad.split("?")[0] == "/health" and status == 200
+            return not gesund
+        # Unbekannte Form: lieber stehenlassen als eine Nachricht verlieren.
+        return True
 
 
 class _OhneSuchbegriffe(logging.Filter):

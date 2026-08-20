@@ -215,3 +215,44 @@ def test_geloescht_wird_nur_im_foto_ordner(tmp_path, monkeypatch) -> None:
     drin = tresor.schreiben(tresor.foto_ordner() / "weg.jpg", b"x")
     assert tresor.entfernen(str(drin)) is True
     assert not drin.exists()
+
+
+# ---------------------------------------------------------------------------
+# Der Weg zurück: verschlüsselt abgelegt heisst nicht unlesbar
+# ---------------------------------------------------------------------------
+def test_die_app_zeigt_das_behaltene_foto_wieder_an(logged_in_client, tmp_path, monkeypatch) -> None:
+    """Sonst nimmt die Verschlüsselung dem Besitzer sein eigenes Sicherheitsnetz.
+
+    Die Einstellung heisst „Reduziertes Bild als Safety auf dem NAS behalten" —
+    gemeint war: bei einer falsch erkannten Zahl in die Freigabe gehen und den
+    Bon ansehen. Verschlüsselt öffnet ihn dort nichts mehr. Es muss also einen
+    Weg in der App geben, sonst ist die Härtung ein Verlust.
+    """
+    monkeypatch.setattr(settings, "attachments_dir", tmp_path)
+    monkeypatch.setattr(settings, "db_key", SCHLUESSEL)
+
+    jpeg = b"\xff\xd8\xff\xe0" + b"BON" * 400
+    pfad = tresor.schreiben(tresor.foto_ordner() / "20260607_101500_000001.jpg", jpeg)
+    assert pfad.suffix == ".enc"
+
+    seite = logged_in_client.get("/settings/beleg-fotos")
+    assert seite.status_code == 200, seite.text
+    assert pfad.name in seite.text, "Das Bild taucht auf der Seite nicht auf"
+
+    bild = logged_in_client.get(f"/settings/beleg-foto/{pfad.name}")
+    assert bild.status_code == 200, bild.text
+    assert bild.content == jpeg, "Ausgeliefert wurde nicht der Klartext"
+    assert bild.headers["content-type"] == "image/jpeg"
+
+
+def test_nur_dateien_aus_dem_foto_ordner_werden_ausgeliefert(
+    logged_in_client, tmp_path, monkeypatch
+) -> None:
+    """Der Name kommt aus der Adresszeile — also wie jede Eingabe behandeln."""
+    monkeypatch.setattr(settings, "attachments_dir", tmp_path)
+    (tmp_path / "geheim.txt").write_bytes(b"nicht ausliefern")
+
+    for name in ("../geheim.txt", "..%2Fgeheim.txt", "gibtsnicht.jpg"):
+        antwort = logged_in_client.get(f"/settings/beleg-foto/{name}")
+        assert antwort.status_code in (404, 400), f"{name} → {antwort.status_code}"
+        assert b"nicht ausliefern" not in antwort.content

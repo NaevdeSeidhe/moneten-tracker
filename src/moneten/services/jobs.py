@@ -230,7 +230,17 @@ def start_scan_job(data: bytes, suffix: str, *, bild_speichern) -> str:
         except Exception as fehler:  # noqa: BLE001 — der Thread darf nie still sterben
             _SCANS[jid].update(zustand="fehler", fehler=str(fehler) or fehler.__class__.__name__)
 
-    threading.Thread(target=arbeiten, name=f"beleg-scan-{jid}", daemon=True).start()
+    # **Erst wenn der Thread wirklich laeuft, ist der Platz belegt.** Der
+    # Eintrag entsteht vorher (der Thread braucht ihn), aber wenn das Starten
+    # scheitert — kein Thread mehr frei, Speicher am Ende —, bliebe er auf
+    # "laeuft" stehen und belegte einen der vier Plaetze fuer immer. Nach vier
+    # solchen Fehlstarts nimmt die App keinen Beleg mehr an, bis jemand den
+    # Container neu startet, und niemand wuesste warum.
+    try:
+        threading.Thread(target=arbeiten, name=f"beleg-scan-{jid}", daemon=True).start()
+    except RuntimeError as fehler:
+        _SCANS[jid].update(zustand="fehler", fehler=f"Kein Thread frei: {fehler}")
+        raise
     return jid
 
 

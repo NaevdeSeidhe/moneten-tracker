@@ -95,20 +95,32 @@ def _save_credentials(db: Session, user: User, creds: list[dict]) -> None:
     db.commit()
 
 
-def _set_challenge(response: Response, challenge: bytes) -> None:
-    token = _wa_signer.sign(bytes_to_base64url(challenge)).decode("utf-8")
+def _set_challenge(response: Response, challenge: bytes, zweck: str) -> None:
+    """Legt die Challenge ab — **mit ihrem Zweck**, nicht nur mit ihrem Wert.
+
+    Ohne den Zweck ist jede Challenge für jede Zeremonie gültig. Das Anmelden
+    braucht keine Anmeldung (es ist der Weg hinein) und liefert eine Challenge;
+    dieselbe Challenge liesse sich dann beim Anlegen eines Passkeys einreichen,
+    und die PIN-Pflicht dort wäre wirkungslos, weil sie nur an der
+    ``begin``-Route sitzt. Der Zweck wird mitsigniert und beim Einlösen geprüft.
+    """
+    token = _wa_signer.sign(f"{zweck}:{bytes_to_base64url(challenge)}").decode("utf-8")
     response.set_cookie(
         _WA_COOKIE, token, max_age=_WA_MAX_AGE, httponly=True,
         secure=not settings.dev_mode, samesite="lax", path="/",
     )
 
 
-def _read_challenge(request: Request) -> bytes | None:
+def _read_challenge(request: Request, zweck: str) -> bytes | None:
+    """Die Challenge — nur, wenn sie für GENAU diesen Zweck ausgestellt wurde."""
     raw = request.cookies.get(_WA_COOKIE)
     if not raw:
         return None
     try:
-        b64 = _wa_signer.unsign(raw, max_age=_WA_MAX_AGE).decode("utf-8")
+        wert = _wa_signer.unsign(raw, max_age=_WA_MAX_AGE).decode("utf-8")
+        gestempelt, trenner, b64 = wert.partition(":")
+        if not trenner or gestempelt != zweck:
+            return None
         return base64url_to_bytes(b64)
     except (BadSignature, SignatureExpired, ValueError):
         return None
@@ -186,7 +198,7 @@ async def register_begin(
         ],
     )
     resp = Response(content=options_to_json(options), media_type="application/json")
-    _set_challenge(resp, options.challenge)
+    _set_challenge(resp, options.challenge, "reg")
     return resp
 
 
@@ -197,7 +209,7 @@ async def register_complete(
     db: Annotated[Session, Depends(get_db)],
 ) -> Response:
     """Prüft die Attestation und speichert den neuen Passkey."""
-    challenge = _read_challenge(request)
+    challenge = _read_challenge(request, "reg")
     if challenge is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Challenge abgelaufen — bitte erneut versuchen.")
     credential = await request.json()
@@ -207,6 +219,10 @@ async def register_complete(
             expected_challenge=challenge,
             expected_rp_id=_rp_id(request),
             expected_origin=_origin(request),
+            # Auch beim ANLEGEN verlangt: sonst nimmt die App einen Schlüssel an,
+            # mit dem sie sich später nie anmelden kann (die Anmeldung verlangt
+            # Nutzerverifikation) — und der Besitzer merkt es erst dann.
+            require_user_verification=True,
         )
     except Exception as exc:  # noqa: BLE001 — jede Verifikations-Fehlerart → 400
         logger.warning("WebAuthn-Registrierung fehlgeschlagen: %s", exc)
@@ -266,7 +282,7 @@ async def authenticate_begin(
         user_verification=UserVerificationRequirement.REQUIRED,
     )
     resp = Response(content=options_to_json(options), media_type="application/json")
-    _set_challenge(resp, options.challenge)
+    _set_challenge(resp, options.challenge, "auth")
     return resp
 
 
@@ -276,7 +292,7 @@ async def authenticate_complete(
     db: Annotated[Session, Depends(get_db)],
 ) -> Response:
     """Prüft die Signatur und setzt bei Erfolg die Session (wie PIN-Login)."""
-    challenge = _read_challenge(request)
+    challenge = _read_challenge(request, "auth")
     if challenge is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Challenge abgelaufen — bitte erneut versuchen.")
     user = _single_user(db)

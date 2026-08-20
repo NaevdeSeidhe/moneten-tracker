@@ -22,7 +22,7 @@ from moneten.auth.pin import (
 from moneten.db.models import User
 from moneten.db.session import get_db
 from moneten.routers.auth_pin import _ist_folge
-from moneten.services import artikelnamen, erkennung_pruefen, scan_protokoll
+from moneten.services import anhang_tresor, artikelnamen, erkennung_pruefen, scan_protokoll
 from moneten.templating import templates
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -190,6 +190,65 @@ def set_name(
         db.add(user)
         db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/beleg-fotos", response_class=HTMLResponse)
+def beleg_fotos_seite(
+    request: Request,
+    user: Annotated[User, Depends(require_login)],
+) -> Response:
+    """Die behaltenen Beleg-Fotos — der Weg, sie überhaupt noch anzusehen.
+
+    Die Einstellung heisst „Reduziertes Bild als Safety auf dem NAS behalten",
+    und genau so war sie gemeint: bei einer falsch erkannten Zahl geht man in
+    die Dateifreigabe und sieht sich den Bon an. Seit die Bilder verschlüsselt
+    abgelegt werden, öffnet sie dort nichts mehr — das Netz wäre für den
+    Besitzer zu, wenn es diese Seite nicht gäbe.
+
+    Sie ist ausserdem der bessere Ort: sie funktioniert vom Handy aus, und die
+    Datei muss dafür nirgends im Klartext liegen.
+    """
+    ordner = anhang_tresor.foto_ordner()
+    bilder = []
+    if ordner.is_dir():
+        for datei in sorted(ordner.iterdir(), reverse=True):
+            if not datei.is_file() or datei.suffix == ".teil":
+                continue
+            bilder.append({
+                "name": datei.name,
+                "groesse": datei.stat().st_size // 1024,
+                "wann": datetime.fromtimestamp(datei.stat().st_mtime).strftime("%d.%m.%Y %H:%M"),
+            })
+    return templates.TemplateResponse(
+        request, "beleg_fotos.html", {"bilder": bilder[:60], "gesamt": len(bilder)},
+    )
+
+
+@router.get("/beleg-foto/{name}")
+def beleg_foto_ausliefern(
+    user: Annotated[User, Depends(require_login)],
+    name: str,
+) -> Response:
+    """Ein einzelnes Bild — entschlüsselt, wenn nötig.
+
+    Der Name kommt aus der Adresszeile, wird also wie jede Eingabe behandelt:
+    ausgeliefert wird nur, was nach dem Auflösen wirklich im Foto-Ordner liegt.
+    """
+    ordner = anhang_tresor.foto_ordner()
+    try:
+        ziel = (ordner / name).resolve()
+        ziel.relative_to(ordner.resolve())
+    except (ValueError, OSError):
+        return Response(status_code=404)
+    if not ziel.is_file():
+        return Response(status_code=404)
+    try:
+        roh = anhang_tresor.lesen(ziel)
+    except anhang_tresor.TresorFehler as fehler:
+        # Kein 500: der Fall ist erklärbar (falscher oder fehlender Schlüssel),
+        # und die Erklärung gehört zum Benutzer, nicht ins Protokoll.
+        return Response(str(fehler), status_code=409, media_type="text/plain; charset=utf-8")
+    return Response(roh, media_type="image/jpeg")
 
 
 @router.get("/scan-protokoll", response_class=HTMLResponse)

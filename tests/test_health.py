@@ -26,6 +26,13 @@ def test_gesunde_healthchecks_stehen_nicht_im_protokoll() -> None:
     Gemessen beim Suchen eines Deploy-Fehlers: ``docker logs --tail 40`` zeigte
     ausschliesslich Healthcheck-Zeilen. Danach wären die drei Meldungen des
     Entrypoints darin nicht mehr zu finden gewesen.
+
+    **Der Test prüfte lange die falsche Zeile.** Er baute den Satz selbst
+    zusammen und hängte hinter den Status noch ein „OK" — erst dadurch traf das
+    damalige Muster ``" 200 "``. Uvicorn schreibt aber
+    ``… "GET /health HTTP/1.1" 200``, mit der Zahl am Zeilenende; der Filter
+    liess also in Wahrheit alles durch, und der Test war grün. Geprüft wird
+    deshalb mit den Bestandteilen, die uvicorn wirklich übergibt.
     """
     import logging
 
@@ -33,11 +40,20 @@ def test_gesunde_healthchecks_stehen_nicht_im_protokoll() -> None:
 
     filt = _OhneGesundeHealthchecks()
 
-    def _satz(text: str) -> logging.LogRecord:
-        return logging.LogRecord("uvicorn.access", logging.INFO, "", 0, text, None, None)
+    def _zugriff(pfad: str, status: int) -> logging.LogRecord:
+        return logging.LogRecord(
+            "uvicorn.access", logging.INFO, "", 0,
+            '%s - "%s %s HTTP/%s" %d',
+            ("127.0.0.1:38136", "GET", pfad, "1.1", status), None,
+        )
 
-    assert not filt.filter(_satz('127.0.0.1:38136 - "GET /health HTTP/1.1" 200 OK'))
+    assert not filt.filter(_zugriff("/health", 200))
     # Alles andere bleibt — auch ein KRANKER Healthcheck.
-    assert filt.filter(_satz('127.0.0.1:38136 - "GET /health HTTP/1.1" 500 Internal Server Error'))
-    assert filt.filter(_satz('127.0.0.1:38136 - "GET /budget HTTP/1.1" 200 OK'))
-    assert filt.filter(_satz('[moneten] Privilegien abgeben — UID 10001, GID 10001'))
+    assert filt.filter(_zugriff("/health", 500))
+    assert filt.filter(_zugriff("/budget", 200))
+
+    # Und was gar keine Zugriffszeile ist, wird nie angefasst: lieber eine Zeile
+    # zu viel als eine verlorene Meldung.
+    eigen = logging.LogRecord("moneten", logging.INFO, "", 0,
+                              "[moneten] Privilegien abgeben — UID 10001", None, None)
+    assert filt.filter(eigen)

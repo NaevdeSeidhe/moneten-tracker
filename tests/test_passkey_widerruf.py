@@ -172,3 +172,40 @@ def test_die_anmelderoute_sperrt_den_pin_login_nicht(client: TestClient) -> None
         f"Der PIN-Login antwortet mit {antwort.status_code} — die Passkey-Anfragen "
         "haben auf denselben Zähler gebucht."
     )
+
+
+# ---------------------------------------------------------------------------
+# Die Challenge gehört zu genau einer Zeremonie
+# ---------------------------------------------------------------------------
+def test_eine_anmelde_challenge_legt_keinen_passkey_an(logged_in_client: TestClient) -> None:
+    """Sonst ist die PIN-Pflicht beim Anlegen wirkungslos.
+
+    Das Anlegen verlangt die PIN — aber nur an der ``begin``-Route. Die
+    Anmelde-Route braucht keine Anmeldung und liefert ebenfalls eine Challenge.
+    Trägt die Challenge ihren Zweck nicht, holt man sie sich dort ab und reicht
+    sie beim Anlegen ein: PIN umgangen.
+    """
+    antwort = logged_in_client.post("/auth/webauthn/authenticate/begin")
+    assert antwort.status_code == 200, antwort.text
+    assert logged_in_client.cookies.get("wa_chal"), "Keine Challenge gesetzt"
+
+    # Mit genau dieser Challenge im Gepäck den Passkey anlegen wollen.
+    weiter = logged_in_client.post(
+        "/auth/webauthn/register/complete",
+        json={"id": "AAAA", "rawId": "AAAA", "type": "public-key", "response": {}},
+    )
+    assert weiter.status_code == 400, weiter.status_code
+    assert "Challenge" in weiter.text, weiter.text
+
+
+def test_die_anmeldung_nimmt_keine_registrier_challenge(logged_in_client: TestClient) -> None:
+    """Die Umkehrung gilt genauso — eine Zeremonie, ein Zweck."""
+    antwort = logged_in_client.post("/auth/webauthn/register/begin", json={"pin": PIN})
+    assert antwort.status_code == 200, antwort.text
+
+    weiter = logged_in_client.post(
+        "/auth/webauthn/authenticate/complete",
+        json={"id": "AAAA", "rawId": "AAAA", "type": "public-key", "response": {}},
+    )
+    assert weiter.status_code == 400
+    assert "Challenge" in weiter.text, weiter.text

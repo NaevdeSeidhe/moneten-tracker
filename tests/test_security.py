@@ -416,3 +416,52 @@ def test_statische_dateien_behalten_ihre_lange_gueltigkeit(client, monkeypatch) 
     kopf = client.get("/static/js/app.js").headers.get("cache-control", "")
     assert "no-store" not in kopf, kopf
     assert "max-age" in kopf, kopf
+
+
+def test_abmelden_loescht_das_cookie_auch_im_betrieb(client, monkeypatch) -> None:
+    """Ein ``__Host-``-Cookie nimmt der Browser nur mit ``Secure`` an — auch das Lösch-Cookie.
+
+    Ohne das Flag verwirft er die Löschung stillschweigend: das Abmelden sieht
+    erfolgreich aus, die Sitzung bleibt bestehen. Geprüft werden deshalb die
+    Eigenschaften der Lösch-Anweisung, nicht nur ihr Vorhandensein.
+    """
+    from moneten.config import settings
+
+    monkeypatch.setattr(settings, "dev_mode", False)
+    client.post("/login", data={"pin": "424242"}, follow_redirects=False)
+    antwort = client.get("/logout", follow_redirects=False)
+
+    zeilen = [w.decode() for k, w in antwort.headers.raw
+              if k.lower() == b"set-cookie" and b"moneten_session" in w]
+    assert zeilen, f"Keine Lösch-Anweisung: {antwort.headers.raw}"
+    host_zeile = next((z for z in zeilen if z.startswith("__Host-")), "")
+    assert host_zeile, f"Das __Host--Cookie wird nicht gelöscht: {zeilen}"
+    assert "Secure" in host_zeile, f"Ohne Secure verwirft der Browser die Löschung: {host_zeile}"
+    assert "Path=/" in host_zeile and "Domain=" not in host_zeile, host_zeile
+
+
+def test_der_healthcheck_filter_filtert_wirklich() -> None:
+    """Er tat es nie: die Statuszahl steht am Zeilenende, ``" 200 "`` trifft dort nicht.
+
+    Der frühere Test prüfte eine Zeilenform, die uvicorn gar nicht erzeugt —
+    grün, und trotzdem lief jede der 2'880 täglichen Healthcheck-Zeilen ins
+    Protokoll. Geprüft wird deshalb mit den Argumenten, die uvicorn wirklich
+    übergibt.
+    """
+    import logging
+
+    from moneten.main import _OhneGesundeHealthchecks
+
+    def zeile(pfad: str, status: int) -> logging.LogRecord:
+        return logging.LogRecord(
+            "uvicorn.access", logging.INFO, __file__, 0,
+            '%s - "%s %s HTTP/%s" %d',
+            ("192.0.2.10:0", "GET", pfad, "1.1", status), None,
+        )
+
+    filt = _OhneGesundeHealthchecks()
+    assert filt.filter(zeile("/health", 200)) is False, "Der gesunde Healthcheck steht im Protokoll"
+    # Was NICHT weggefiltert werden darf:
+    assert filt.filter(zeile("/health", 503)) is True, "Ein kranker Healthcheck fehlt im Protokoll"
+    assert filt.filter(zeile("/transactions", 200)) is True
+    assert filt.filter(zeile("/healthcheck-irgendwas", 200)) is True

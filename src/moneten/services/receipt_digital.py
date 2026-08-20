@@ -599,6 +599,12 @@ def save_receipt(db: Session, structured: dict, ocr_text: str | None,
     if tx is not None:
         _attach_structured(db, tx, structured, ocr_text)
         db.commit()
+        # Auch hier geht das Bild mit. Dieser Zweig hinterlaesst KEINEN
+        # vorgemerkten Beleg — auf das Foto zeigt danach also nichts mehr, und
+        # es fiele durch jedes Aufraeumen, das an ``PendingReceipt`` haengt.
+        # Erst nach dem Commit: scheitert der, bleibt das Bild, und der naechste
+        # Anlauf findet es noch vor.
+        anhang_tresor.entfernen(image_path)
         return {"attached_tx_id": tx.id, "pending_id": None, **befund}
     pend = PendingReceipt(
         merchant=structured.get("merchant") or None,

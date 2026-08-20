@@ -2639,13 +2639,24 @@
             : (file.name || "beleg").replace(/\.[^.]+$/, "") + ".jpg";
           fd.append("photo", blob, name);
           const r = await fetch("/import/receipts/photo/start", { method: "POST", body: fd, credentials: "same-origin" });
-          if (!r.ok) throw new Error("upload " + r.status);  // Fehlerseite nie ins Modal swappen
+          if (!r.ok) {
+            // Der Server sagt bei 413 (zu gross) und 429 (zu viele offene
+            // Erkennungen), WARUM er ablehnt. Ohne diesen Zweig wurde daraus
+            // ein pauschales "bitte nochmal" — und "nochmal" ist bei 429
+            // genau der falsche Rat: es macht die Warteschlange laenger.
+            let grund = "";
+            try { grund = (await r.json()).fehler || ""; } catch (_) {}
+            const fehler = new Error("upload " + r.status);
+            fehler.meldung = grund;
+            throw fehler;  // Fehlerseite nie ins Modal swappen
+          }
           const { jid } = await r.json();
           kzMerkeAuftrag(jid);
           await kzHoleErgebnis(jid);
-        } catch (_) {
+        } catch (fehler) {
           kzVergissAuftrag();
-          document.body.dispatchEvent(new CustomEvent("moneten:toast", { detail: { message: "Beleg-Upload fehlgeschlagen — bitte nochmal." } }));
+          const meldung = (fehler && fehler.meldung) || "Beleg-Upload fehlgeschlagen — bitte nochmal.";
+          document.body.dispatchEvent(new CustomEvent("moneten:toast", { detail: { message: meldung } }));
           kzSetBusy(false);
         }
       });

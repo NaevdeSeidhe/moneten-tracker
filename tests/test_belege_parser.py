@@ -592,7 +592,7 @@ Der Nettomietzins basiert auf einem Referenzzinssatz von 1.75 % .
 
 _LEISTUNGSABRECHNUNG = """
 MUSTERKASSE Leistungsabrechnung
-Behandlung 
+Behandlung
 Ihre Jahresfranchise 2021 CHF 2'500.00
 Franchise CHF 180.00
 Selbstbehalt CHF 20.00

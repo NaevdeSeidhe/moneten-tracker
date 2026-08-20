@@ -1,0 +1,33 @@
+{% extends "_shell.html" %}
+{% block title %}Behaltene Beleg-Fotos — Moneten-Tracker{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div><h1 class="hero-greeting">Behaltene Beleg-Fotos</h1></div>
+  <div class="hero-aside"><a class="btn btn-ghost" href="/settings">← zurück</a></div>
+</div>
+
+<div class="card">
+  {% if bilder %}
+  <p class="muted text-sm mb-4">
+    {{ gesamt }} Bild(er) im Ordner{% if gesamt > bilder|length %}, gezeigt werden die neuesten {{ bilder|length }}{% endif %}.
+    Sie liegen verschlüsselt auf dem NAS und werden hier zum Ansehen geöffnet.
+  </p>
+  <div class="beleg-fotos-gitter">
+    {% for b in bilder %}
+    <figure class="beleg-foto">
+      <a href="/settings/beleg-foto/{{ b.name }}" target="_blank" rel="noopener">
+        <img src="/settings/beleg-foto/{{ b.name }}" alt="Beleg vom {{ b.wann }}" loading="lazy">
+      </a>
+      <figcaption class="muted text-sm">{{ b.wann }} · {{ b.groesse }} KB</figcaption>
+    </figure>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">
+    Keine Bilder abgelegt. Behalten wird nur, wenn in den Einstellungen
+    „Reduziertes Bild als Safety auf dem NAS behalten" eingeschaltet ist.
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

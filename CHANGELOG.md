@@ -3,6 +3,14 @@
 Grobe Übersicht, eine Zeile je Sache. Die ausführliche Entwicklungs-Historie
 gehört nicht hierher.
 
+## 0.82.1
+
+- Passkey-Anlegen: Challenge an ihren Zweck gebunden
+- Abmelden löscht das Sitzungscookie wieder zuverlässig
+- Behaltene Beleg-Fotos lassen sich in den Einstellungen ansehen
+- Healthcheck-Zeilen verschwinden wirklich aus dem Protokoll
+- Kleinere Korrekturen an Beleg-Erkennung, Aufräumen und Meldungen
+
 ## 0.82.0
 
 - Beleg-Fotos werden verschlüsselt abgelegt (AES-256-GCM, Schlüssel aus `MONETEN_DB_KEY` abgeleitet)
