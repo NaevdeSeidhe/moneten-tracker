@@ -1,0 +1,109 @@
+{% extends "_shell.html" %}
+{% block title %}Einstellungen — Moneten-Tracker{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div>
+    <h1 class="hero-greeting">Einstellungen</h1>
+  </div>
+</div>
+
+<div class="grid-2">
+
+  <div class="card">
+    <h2>Benutzer</h2>
+    {# B16: „Aktives Theme"-Zeile entfernt — sie dupliziert nur den Schalter oben. #}
+    {# Der Name war hier eine Nur-Text-Zeile — an der Stelle, an der man ihn
+       ändern will. Jetzt ein Feld, das beim Verlassen speichert (wie die
+       übrigen Schalter dieser Seite). #}
+    <div class="row">
+      {# ``div`` und nicht ``label`` als Zeile: ``.row`` setzt ``display:flex``,
+         ``.card label { display: block }`` ist spezifischer und gewinnt. Die
+         Zeile wurde dadurch zum Block, und das Feld hing 41px vom rechten Rand
+         weg — nachgemessen im Browser, nicht vermutet. #}
+      <label class="muted" for="benutzer-name">Name</label>
+      <input id="benutzer-name" type="text" name="name" maxlength="80"
+             value="{{ user.name }}" autocomplete="off"
+             hx-post="/settings/name" hx-trigger="change" hx-swap="none"
+             style="max-width:14rem; text-align:right">
+    </div>
+    <div class="row"><span class="muted">Konto angelegt</span><span>{{ user.created_at.strftime('%d.%m.%Y') }}</span></div>
+
+    <h2 class="mt-6">Kategorien</h2>
+    <a href="/categories" class="btn mt-4">{{ icon('tag') }} Kategorien verwalten</a>
+
+    {# Ohne Beschreibungssatz: „Konten anlegen, umbenennen, Startsaldo setzen,
+       archivieren oder löschen" zählte auf, was hinter dem Knopf steht — eine
+       Definition der Überschrift, die man auf der Zielseite ohnehin sieht. #}
+    <h2 class="mt-6">Konten</h2>
+    <a href="/accounts?manage=1" class="btn mt-4">{{ icon('wallet') }} Konten verwalten</a>
+
+    {# Der Satz bleibt, aber nur sein folgenreicher Teil: dass das Original-Foto
+       weg ist, erfährt man sonst nirgends — und danach ist es zu spät. Der
+       OCR-Ablauf drumherum ist Beiwerk. #}
+    <h2 class="mt-6">Belege (Foto-Upload)</h2>
+    <p class="muted text-sm">
+      Das Original-Foto wird nach der Erkennung <strong>verworfen</strong>; gespeichert
+      werden nur die digitalen Daten.
+    </p>
+    <label class="flex items-center gap-2 mt-4" style="cursor:pointer">
+      <input type="checkbox" name="keep" {% if user.receipt_photo_keep %}checked{% endif %}
+             hx-post="/settings/receipt-keep" hx-trigger="change" hx-swap="none">
+      <span>Reduziertes Bild als Safety auf dem NAS behalten</span>
+    </label>
+    {# Der Weg zum Rohtext. Er steht hier und nicht in einem eigenen Menuepunkt,
+       weil man ihn genau dann sucht, wenn die Erkennung danebenlag — also im
+       selben Zusammenhang wie die Einstellung darueber. #}
+    <a class="btn mt-4" href="/settings/scan-protokoll">Scan-Protokoll ansehen</a>
+    <a class="btn mt-4" href="/settings/positionen">Positionen vereinheitlichen</a>
+    <a class="btn mt-4" href="/settings/erkennung">Erkennung nachprüfen</a>
+  </div>
+
+  <div class="card">
+    <h2>PIN ändern</h2>
+
+    <form class="form-grid mt-4"
+          hx-post="/settings/pin"
+          hx-target="#pin-feedback"
+          hx-swap="innerHTML"
+          autocomplete="off">
+      <div>
+        <label for="current_pin">Aktuelle PIN</label>
+        <input type="password" inputmode="numeric" pattern="\d{6}" maxlength="6" id="current_pin" name="current_pin" required>
+      </div>
+      <div>
+        <label for="new_pin">Neue PIN</label>
+        <input type="password" inputmode="numeric" pattern="\d{6}" maxlength="6" id="new_pin" name="new_pin" required>
+      </div>
+      <div>
+        <label for="confirm_pin">Neue PIN bestätigen</label>
+        <input type="password" inputmode="numeric" pattern="\d{6}" maxlength="6" id="confirm_pin" name="confirm_pin" required>
+      </div>
+      <button type="submit" class="btn btn-primary">PIN speichern</button>
+    </form>
+    <div id="pin-feedback"></div>
+
+    {# „Anmelden per Fingerabdruck oder Gesicht statt PIN" stand als Erklärung
+       unter einer Überschrift, die „Biometrie-Login" schon sagt. #}
+    <h2 class="mt-6">Passkey / Biometrie-Login</h2>
+    {# Die PIN steht hier, weil ein Passkey die PIN ERSETZT. Wer einen anlegen
+       darf, kommt danach ohne sie herein — dann muss das Anlegen selbst so viel
+       verlangen wie ein PIN-Wechsel. Vorher genügte das Sitzungs-Cookie. #}
+    <label class="row mt-4" for="wa-pin">
+      <span>Aktuelle PIN</span>
+      <input id="wa-pin" type="password" inputmode="numeric" autocomplete="current-password"
+             maxlength="6" pattern="[0-9]{6}" placeholder="······">
+    </label>
+    <div class="flex items-center gap-3 mt-4">
+      <button type="button" id="wa-register" class="btn">{{ icon('shield-lock') }} Passkey auf diesem Gerät einrichten</button>
+      <button type="button" id="wa-entfernen" class="btn btn-ghost">{{ icon('trash') }} Alle entfernen</button>
+      <span id="wa-msg" class="text-sm"></span>
+    </div>
+    <p class="text-sm muted mt-4">
+      Eingerichtet: <span id="wa-anzahl">–</span>. Entfernen nimmt <b>alle</b> Passkeys
+      weg — danach kommst du weiterhin mit der PIN herein und richtest neu ein.
+    </p>
+  </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "_shell.html" %}
+{% block title %}Beleg-Diagnose-Log — Moneten-Tracker{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div><h1 class="hero-greeting">Beleg-Diagnose-Log</h1></div>
+  <div class="hero-aside"><a class="btn btn-ghost" href="/import/receipts">← zurück</a></div>
+</div>
+
+<div class="card">
+  <div class="flex items-center justify-between mb-4" style="gap:12px;flex-wrap:wrap">
+    <div class="muted text-sm">
+      {{ rows|length }} unzugeordnete Beleg(e)
+    </div>
+    <button type="button" class="btn btn-primary" data-copy-target="#log-text">Alles kopieren</button>
+  </div>
+  <textarea id="log-text" readonly rows="24" spellcheck="false"
+            style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:12px;white-space:pre">Dateiname | Betrag | Datum | Quelle | Grund
+{% for r in rows %}{{ r.name }} | {{ r.amount }} | {{ r.date }} | {{ r.method }} | {{ r.reason }}
+{% endfor %}</textarea>
+</div>
+{% endblock %}

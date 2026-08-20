@@ -1,0 +1,87 @@
+{# Massen-Zuweisung: alle Treffer des aktuellen Filters einer Kategorie zuordnen.
+
+   Eigenes Partial, weil der Umschalter „bereits zugeordnete überschreiben" nur
+   DIESE Leiste neu holt (/transactions/bulk-bar) — die Vorschau-Zahlen und der
+   Text der Sicherheitsabfrage kommen so immer frisch vom Server und können nicht
+   von der Wirkung des Knopfes abweichen.
+
+   Die Zahlen sprechen über den GANZEN Filter, nicht über die geladenen
+   Monatskarten. Deshalb steht es auch so da: „auch in noch nicht geladenen
+   Monaten". #}
+{% from "partials/cat_picker.html" import cat_picker %}
+
+<div class="tx-bulk" id="tx-bulk">
+  {# „zuweisbar" statt „im Filter": die Zahl zählt NICHT dasselbe wie die
+     Summenzeile darüber. Aufgeteilte Buchungen und Umbuchungen sind hier
+     absichtlich draussen (bulk_conditions) — stünde hier die Filteranzahl,
+     widerspräche die Leiste der Zeile direkt über ihr. #}
+  <div class="tx-bulk-head">
+    <strong>{{ bulk.alle_count }}</strong> zuweisbare Buchung{{ 'en' if bulk.alle_count != 1 }} im Filter{% if bulk.zeit_label %} ({{ bulk.zeit_label }}){% endif %}
+    <span class="muted">· ohne aufgeteilte und Umbuchungen · davon {{ bulk.offen_count }} ohne Kategorie</span>
+  </div>
+
+  {% if bulk.alle_count %}
+    <div class="tx-bulk-row">
+      {# Zielkategorie. Feldname bewusst NICHT „category_id" — so heisst der
+         Kategorie-FILTER, und beide reisen mit derselben Anfrage. #}
+      {{ cat_picker("assign_category_id", category_groups,
+                    selected=bulk.assign_category_id, key="bulk-cat",
+                    none_label="— Kategorie wählen —") }}
+      {# hx-vals trägt den EINGEFRORENEN Filter, aus dem die Zahlen unten und der
+         Text der Sicherheitsabfrage gerechnet wurden. Vorher stand hier
+         hx-include="#tx-filter": das las die Felder im Moment des Klicks, während
+         der Bestätigungstext vom letzten Rendern stammte — wer während der
+         400-ms-Verzögerung des Suchfelds weitertippte, bestätigte eine Zahl und
+         löste eine andere Menge aus. #tx-bulk bleibt drin: dort steht die
+         Zielkategorie, die der Nutzer NACH dem Rendern wählt. #}
+      <button type="button" class="btn btn-primary tx-bulk-go"
+              hx-post="/transactions/assign-filtered"
+              hx-target="#transactions-root" hx-swap="innerHTML"
+              hx-include="#tx-bulk"
+              hx-vals='{{ bulk.hx_vals }}'
+              data-ziel="{{ bulk.ziel_count }}"
+              title="Ordnet alle Treffer des angezeigten Filters der gewählten Kategorie zu"
+              {% if not bulk.ziel_count or not bulk.assign_category_id %}disabled{% endif %}
+              hx-confirm="{{ bulk.ziel_count }} Buchung(en){% if filter.q %} zur Suche „{{ filter.q }}“{% endif %} · Summe {{ bulk.ziel_sum | chf }} — jetzt zuordnen? Das trifft ALLE Treffer des Filters {% if bulk.zeit_label %}aus {{ bulk.zeit_label }}{% else %}aus allen Jahren{% endif %}, auch in noch nicht geladenen Monaten.{% if not bulk.undo_moeglich %} Achtung: bei über {{ bulk.max_undo }} Buchungen gibt es kein Rückgängig.{% endif %}">
+        {{ icon('check') }} Zuweisen
+      </button>
+    </div>
+
+    {# Warum der Knopf grau ist. Ein deaktivierter Knopf ohne Begründung ist die
+       zweitschlechteste Variante nach einem Knopf, der garantiert scheitert.
+       app.js blendet die Zeile aus, sobald eine Kategorie gewählt ist. #}
+    <div class="tx-bulk-note muted" id="tx-bulk-hint" {% if bulk.assign_category_id %}hidden{% endif %}>
+      Erst eine Zielkategorie wählen.
+    </div>
+
+    {# Vorschau: Anzahl UND Summe stehen VOR dem Klick da. Der Nutzer soll nicht
+       blind auf Treffer losgehen, die er nicht gesehen hat. #}
+    <div class="tx-bulk-preview" aria-live="polite">
+      Betrifft <strong>{{ bulk.ziel_count }}</strong> Buchung{{ 'en' if bulk.ziel_count != 1 }} ·
+      Summe <span class="mono" style="color:{{ 'var(--accent-tertiary)' if bulk.ziel_sum >= 0 else 'var(--dusty-rose)' }}">{{ '+' if bulk.ziel_sum > 0 }}{{ bulk.ziel_sum | chf }}</span>
+      {%- if not bulk.undo_moeglich %} <span class="pill" style="color:var(--warn)">kein Rückgängig</span>{% endif %}
+    </div>
+
+    {# Entscheidung sichtbar machen: standardmässig bleiben bereits zugeordnete
+       Buchungen unberührt („manuell gesetzte Kategorien werden nie
+       überschrieben"). Umkategorisieren geht — aber nur als bewusster Schritt.
+       Hier liest hx-include den Filter absichtlich LIVE: der Umschalter rendert
+       die Leiste neu, und eine Neuberechnung soll den aktuellen Filter zeigen.
+       Nur der Knopf oben friert ein — er löst aus, statt anzuzeigen. #}
+    <label class="tx-bulk-opt">
+      <input type="checkbox" name="overwrite" value="1" {% if bulk.overwrite %}checked{% endif %}
+             hx-get="/transactions/bulk-bar" hx-target="#tx-bulk" hx-swap="outerHTML"
+             hx-include="#tx-filter, #tx-bulk" hx-trigger="change"
+             {% if not bulk.belegt_count %}disabled{% endif %}>
+      <span>Die {{ bulk.belegt_count }} bereits zugeordneten überschreiben</span>
+    </label>
+    <div class="tx-bulk-note muted">
+      Aufgeteilte Buchungen und Umbuchungen bleiben immer aussen vor.
+    </div>
+  {% else %}
+    <div class="tx-bulk-note muted">
+      Nichts zuzuordnen: der Filter trifft keine zuweisbare Buchung
+      (aufgeteilte Buchungen und Umbuchungen bleiben aussen vor).
+    </div>
+  {% endif %}
+</div>

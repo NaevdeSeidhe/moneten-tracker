@@ -1,0 +1,144 @@
+# Baut das fertige Abbild und legt es in die GitHub-Registry (ghcr.io).
+#
+# **Wozu.** Wer die App benutzen will, soll sie nicht bauen muessen. Der Bau
+# zieht Tesseract, OpenCV und ein halbes Dutzend Pakete mit Fremdcode — auf
+# einem kleinen NAS dauert das viele Minuten und braucht Platz, den es dort oft
+# nicht gibt. Ein fertiges Abbild laedt man herunter und startet es.
+#
+# **Wann es laeuft.** Bei einer Fassungsmarke (``git tag v0.79.0 && git push
+# --tags``) und auf Knopfdruck. Nicht bei jedem Commit: eine Registry voller
+# Zwischenstaende hilft niemandem.
+#
+# **Die Anlaufprobe ist Absicht.** Ein Abbild, das gebaut wurde, ist nicht
+# dasselbe wie eines, das startet. Hier laeuft es einmal wirklich an und muss
+# ``/health`` beantworten, bevor es veroeffentlicht wird. Faellt es durch, wird
+# nichts hochgeladen.
+#
+# **Nur x86_64.** Nachgemessen: alle Pakete haben Raeder fuer ARM — ausser
+# ``sqlcipher3-binary``, also ausgerechnet die Verschluesselung. Fuer ein
+# ARM-Geraet (kleine Synology-Modelle, Raspberry Pi) muss das Nachfolgepaket
+# ``sqlcipher3`` eingesetzt und neu gesperrt werden; siehe README, Abschnitt
+# „Andere Rechnerarchitektur".
+
+name: Abbild bauen
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  abbild:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # Fuer die Herkunftsbescheinigung (siehe letzter Schritt): ``id-token``
+      # holt das kurzlebige Zeugnis von GitHubs Sigstore-Dienst, ``attestations``
+      # darf es danach hinterlegen.
+      id-token: write
+      attestations: write
+
+    steps:
+      # **Auf den Commit festgenagelt, nicht auf das Tag.** ``v4`` ist im
+      # Repository von actions/checkout beweglich: wer es umhaengen kann, laesst
+      # in jedem kuenftigen Bau fremden Code mitlaufen — mit Lesezugriff auf den
+      # Quelltext und, je nach Schritt, auf das Registry-Token. Genau so lief es
+      # im Maerz 2025 bei tj-actions/changed-files, wo alle Fassungs-Tags auf
+      # einen boesartigen Commit gezogen wurden.
+      #
+      # Der Kommentar dahinter sagt, welche Fassung dieser Commit ist — sonst
+      # weiss beim naechsten Aktualisieren niemand, wovon man ausgeht.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+
+      - name: Namen bestimmen
+        id: name
+        env:
+          BESITZER: ${{ github.repository_owner }}
+        run: |
+          # Die Registry verlangt Kleinschreibung; ein Kontoname hat sie nicht
+          # zwangslaeufig.
+          echo "abbild=ghcr.io/${BESITZER,,}/moneten-tracker" >> "$GITHUB_OUTPUT"
+          marke="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then marke="pruefstand"; fi
+          echo "marke=${marke}" >> "$GITHUB_OUTPUT"
+
+      - name: Bauen
+        run: docker build -t "${{ steps.name.outputs.abbild }}:probe" .
+
+      - name: Anlaufen lassen und /health fragen
+        run: |
+          # Gewuerfelt statt hingeschrieben: ein Schluessel im Klartext in
+          # einer oeffentlichen Datei ist auch dann ein schlechtes Vorbild,
+          # wenn er nur einen Wegwerf-Container aufsperrt.
+          docker run -d --name probe -p 8000:8000 \
+            -e MONETEN_SECRET_KEY="$(head -c 32 /dev/urandom | base64)" \
+            -e MONETEN_INITIAL_PIN=424242 \
+            "${{ steps.name.outputs.abbild }}:probe"
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/health; then
+              echo; echo "Das Abbild laeuft."; exit 0
+            fi
+            sleep 2
+          done
+          echo "Keine Antwort nach 120 Sekunden. Protokoll:"
+          docker logs probe
+          exit 1
+
+      - name: Aufraeumen
+        if: always()
+        run: docker rm -f probe || true
+
+      - name: Anmelden
+        if: github.ref_type == 'tag'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Veroeffentlichen
+        id: schieben
+        if: github.ref_type == 'tag'
+        run: |
+          abbild="${{ steps.name.outputs.abbild }}"
+          docker tag "${abbild}:probe" "${abbild}:${{ steps.name.outputs.marke }}"
+          docker tag "${abbild}:probe" "${abbild}:latest"
+          docker push "${abbild}:${{ steps.name.outputs.marke }}"
+          docker push "${abbild}:latest"
+
+          # Den Digest festhalten, den die Registry vergeben hat. Er ist der
+          # einzige Name, der genau EIN Abbild meint: Marken wie ``latest`` oder
+          # ``0.82.0`` lassen sich umhaengen, ein Digest nicht.
+          marke="${{ steps.name.outputs.marke }}"
+          voll=$(docker inspect --format='{{index .RepoDigests 0}}' "${abbild}:${marke}")
+          digest="${voll#*@}"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Abbild veroeffentlicht"
+            echo
+            echo "Digest: \`${digest}\`"
+            echo
+            echo "Wer festnageln will, statt der Marke zu folgen, traegt in"
+            echo "\`docker-compose.yml\` ein:"
+            echo
+            echo '```yaml'
+            echo "    image: ${abbild}@${digest}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # **Herkunftsbescheinigung.** Ohne sie ist ``latest`` ein Versprechen ohne
+      # Beleg: wer Schreibrecht auf die Registry erlangt, schiebt ein eigenes
+      # Abbild unter denselben Namen, und der naechste ``docker compose pull``
+      # holt es. Mit ihr haengt an jedem Abbild ein signierter Nachweis, WELCHER
+      # Lauf in WELCHEM Repository es aus WELCHEM Commit gebaut hat. Pruefen:
+      #
+      #     gh attestation verify oci://ghcr.io/<konto>/moneten-tracker:<marke> \
+      #        --owner <konto>
+      #
+      # Die Signatur entsteht kurzlebig ueber Sigstore — es gibt keinen privaten
+      # Schluessel, den jemand stehlen koennte.
+      - name: Herkunft bescheinigen
+        if: github.ref_type == 'tag'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-name: ${{ steps.name.outputs.abbild }}
+          subject-digest: ${{ steps.schieben.outputs.digest }}
+          push-to-registry: true

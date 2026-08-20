@@ -1,0 +1,86 @@
+[project]
+name = "moneten-tracker"
+# Die Version steht an EINER Stelle: `src/moneten/__init__.py`. Hier stand sie
+# ein zweites Mal und blieb bei 0.49.0 stehen, waehrend die App sich als 0.66.0
+# meldete — im Build-Protokoll las man dann "bilanz-0.49.0" (`bilanz` war der
+# fruehere Name des Projekts). Folgenlos, aber
+# eine Zahl, die luegt, ist eine Zahl zu viel.
+dynamic = ["version"]
+description = "Moneten-Tracker — selbstgehostete Budget-App für eine Person"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "NaevdeSeidhe" }]
+
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy>=2.0.36",
+    "alembic>=1.13",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.31",   # Untergrenze aus pip-audit (Formular-Parser)
+    "pydantic>=2.9",
+    "pydantic-settings>=2.14.2",
+    "itsdangerous>=2.2",
+    "argon2-cffi>=23.1",
+    "python-dotenv>=1.0",
+    "webauthn>=2.5",
+    "pymupdf>=1.24",      # Quittungs-Text-Layer lesen + zu Bild rendern
+    "rapidocr-onnxruntime>=1.4",  # PRIMÄRE OCR-Engine: PaddleOCR-Modelle via ONNX, gebündelt
+                                  # → überall identisch (NAS=lokal), robust auf Thermo-Bons.
+                                  # Zieht onnxruntime+opencv-python+numpy (Docker: libgl1 nötig).
+    "pytesseract>=0.3.13",  # OCR-FALLBACK (braucht Tesseract-Binary, im Docker installiert)
+    "pillow>=12.3.0",    # Bildverarbeitung für OCR; Untergrenze aus pip-audit
+    "tzdata>=2024.1",    # IANA-Zeitzonen für zoneinfo (Begrüssung in Europe/Zurich; NAS läuft UTC)
+    # --- Untergrenzen für Pakete, die nur MITTELBAR hereinkommen -------------
+    # Sie stehen hier, weil eine Lücke in einem mitgezogenen Paket dieselbe
+    # Lücke ist wie in einem direkten. Ohne Untergrenze zieht ein frischer
+    # Build irgendeine Fassung, die der Vermittler zulässt — auch eine mit
+    # bekanntem Loch. Stand der Prüfung: pip-audit, 17.08.2026.
+    "starlette>=1.3.1",           # kommt über fastapi
+    "cryptography>=50.0.0",       # kommt über webauthn
+    "pyasn1>=0.6.4",              # kommt über webauthn
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.7",
+    # JavaScript-Parser fuer tests/test_js_syntax.py. Ein Syntaxfehler in
+    # app.js legt Scan, Picker und Suche lahm, ohne dass ein Test rot wird —
+    # dieselbe lautlose Sorte Fehler wie eine kaputte Klammer im Stilblatt.
+    # Nur Entwicklung: im Docker-Image ist er nicht drin.
+    "esprima>=4.0",
+]
+# Verschlüsselte SQLite-DB (SQLCipher). Self-contained Wheel (bündelt SQLCipher +
+# OpenSSL) — kein System-Paket nötig. Hat keinen Windows-Wheel; wird im
+# Docker-Image (Linux) installiert und per MONETEN_DB_KEY aktiviert.
+encryption = [
+    "sqlcipher3-binary>=0.5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/moneten/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/moneten"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+asyncio_mode = "auto"
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]

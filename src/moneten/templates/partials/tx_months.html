@@ -1,0 +1,139 @@
+{# Monatskarten der Buchungsliste + „Ältere Monate laden"-Slot.
+
+   Wird (a) aus transactions_root.html inkludiert und (b) vom Router direkt
+   gerendert, wenn ?before=YYYY-MM-DD per HTMX ältere Monate nachlädt — die
+   Antwort ersetzt den #tx-loadmore-Slot (outerHTML) und hängt so weitere
+   Monatskarten samt neuem Slot an. Kontext: _months_context / _base_context. #}
+{% from "partials/cat_picker.html" import cat_trigger %}
+{% from "partials/row_menu.html" import row_menu %}
+{% for g in month_groups %}
+  <details class="month-card tl-card" data-year="{{ g.year }}" {% if loop.first and not from_loadmore %}open{% endif %}>
+    <summary class="month-head">
+      {# Links steht, WORÜBER der Kopf spricht (Monat, Anzahl, Ein und Aus),
+         rechts allein das Ergebnis. Vorher stapelten sich Saldo und Aufteilung
+         beide rechts — mit der jetzt breiteren, beschrifteten Aufteilung blieben
+         dem Titel auf 375px nur noch 148 statt der nötigen 153px, „September
+         2026 · 42" brach um und der Kopf wuchs von 52 auf 62px. Nachgemessen.
+
+         Die Aufteilung ist beschriftet mit denselben zwei Wörtern wie der
+         Summenblock derselben Seite (.txs-bar-cap „Ein"/„Aus"), damit die Karte
+         keine zweite Sprache aufmacht. Vorher stand hier „+5'726 · −": zwei
+         unbeschriftete Zahlen und ein Trennpunkt; bei null Ausgaben schrumpfte
+         die zweite Zahl auf den Gedankenstrich von chf_kurz — ohne
+         Beschriftung war nicht erkennbar, wovon der Strich die Abwesenheit war.
+
+         Die Null steht darum als „0" statt als Gedankenstrich: der Strich
+         ersetzt in dichten Listen das dort hundertfach wiederholte „CHF 0.00" —
+         unter einer eigenen Beschriftung ist die 0 aber noch kürzer als der
+         Ersatz und sagt dasselbe. Gedämpft (is-null), weil nichts geschah.
+
+         Beide Richtungen bleiben IMMER stehen, auch die leere: nur so stehen
+         Beschriftung und Betrag über alle Karten hinweg in derselben Spalte und
+         die Liste bleibt scannbar. #}
+      <span class="month-ident">
+        <span class="month-title">{{ g.label }} <span class="muted text-sm">· {{ g.count }}</span></span>
+        <span class="mt-flow">
+          <span class="mt-leg"><span class="mt-cap">Ein</span><span class="mt-num in{{ ' is-null' if not g.income }}">{{ g.income | chf_kurz if g.income else 0 }}</span></span>
+          <span class="mt-leg"><span class="mt-cap">Aus</span><span class="mt-num out{{ ' is-null' if not g.expense }}">{{ g.expense | chf_kurz if g.expense else 0 }}</span></span>
+        </span>
+      </span>
+      <span class="mt-val" style="color:{{ 'var(--accent-tertiary)' if g.net >= 0 else 'var(--danger)' }}"
+            title="Saldo {{ g.label }}">{{ g.net | chf_wert }}</span>
+    </summary>
+    <div class="month-body">
+      {% for tx in g.txs %}
+        {% set is_transfer = (tx.management_type and tx.management_type.value == 'T') %}
+        {# Lohnzusammensetzung — nur an Buchungen, für die eine erfasst ist. Die
+           Zeile bekommt dann eine zweite Gitterzeile (.hat-lohn). Als Klasse
+           angekündigt und nicht per :has() abgeleitet: ein leeres Gitterfeld
+           auf JEDER Zeile kostet 14px Abstand, auch wo nichts steht. #}
+        {% set lohn = lohn_by_tx.get(tx.id) %}
+        {# Positionen des Belegs — gefüllt nur bei einer gelesenen Rechnung, deren
+           Positionen den gebuchten Betrag ergeben (siehe _attachments_by_tx).
+           Dieselbe Ankündigung als Klasse wie beim Lohn, aus demselben Grund. #}
+        {% set beleg_posten = (attachments_by_tx.get(tx.id) or [{}])[0].get('posten') %}
+        <div class="tx-row{% if lohn %} hat-lohn{% elif beleg_posten %} hat-posten{% endif %}">
+          <span class="tx-date">{{ tx.date.strftime('%d.%m.') }}</span>
+          <span class="tx-main">
+            {# desc_kurz schneidet nur fürs Auge Bank-Präfixe ab („E-Banking
+               Auftrag an " frisst 21 der ~19 sichtbaren Zeichen). Gesucht,
+               gefiltert und gespeichert wird weiter der Originaltext — er hängt
+               als title an der Zeile. #}
+            <span class="tx-desc" title="{{ tx.description or '' }}">{{ tx.description | desc_kurz }}</span>
+            {% if tx.id in attachment_tx_ids %}
+              {% set _att = attachments_by_tx[tx.id][0] %}
+              <button type="button" class="tx-receipt" title="Beleg ansehen" aria-label="Beleg ansehen"
+                      data-merchant="{{ tx.description or 'Beleg' }}"
+                      data-date="{{ tx.date.strftime('%d.%m.%Y') }}"
+                      data-txamount="{{ tx.amount.copy_abs() | chf }}"
+                      data-txid="{{ tx.id }}"
+                      data-splits='{{ splits_by_tx.get(tx.id, []) | tojson }}'
+                      data-name="{{ _att.name }}" data-amount="{{ _att.amount or '' }}"
+                      data-method="{{ _att.method or '' }}" data-attid="{{ _att.id }}">{{ icon('receipt') }}</button>
+            {% endif %}
+          </span>
+          <span class="tx-meta">
+            {% if is_transfer %}
+              <span class="pill" style="color:var(--accent-secondary)">↔ Transfer</span>
+            {% elif tx.is_split %}
+              <span class="pill" style="color:var(--accent-primary)" title="In mehrere Kategorien aufgeteilt">{{ icon('tag') }} Aufgeteilt · {{ splits_by_tx.get(tx.id, []) | length }}</span>
+            {% else %}
+              {# Kategorie direkt aus der Zeile setzen. In der Zeile steht NUR der
+                 Auslöser (Knopf + Hidden-Input, rund 300 Byte); die Pillen stehen
+                 einmal im gemeinsamen #cat-panel der Shell. Früher holte der Knopf
+                 den aufgeklappten Picker per `hx-get=?quickcat=<id>` vom Server —
+                 ein Roundtrip über die ganze Liste, und „offen" stand nur im
+                 URL-Parameter: die nächste Antwort (nachlaufende Suche, Filter)
+                 rendert ohne quickcat und das Fenster war wieder zu.
+                 Feldname bewusst „assign_category_id" und nicht „category_id" —
+                 so heisst der FILTER, der per hx-include aus #tx-filter mitreist. #}
+              {% call cat_trigger("assign_category_id", selected=(tx.category_id or ""),
+                                  none_label="— keine —", key=("tx-" ~ tx.id),
+                                  cls="cat-picker-inline",
+                                  btn_cls=("tx-cat-btn" if tx.category else "tx-cat-btn is-empty"),
+                                  btn_title="Kategorie direkt ändern",
+                                  hx=('hx-post="/transactions/' ~ tx.id ~ '/category" hx-target="#transactions-root" hx-swap="innerHTML" hx-include="#tx-filter" hx-trigger="change"')) %}
+                {% if tx.category %}{{ icon(tx.category.icon) }}{{ tx.category.name }}{% else %}+ Kategorie{% endif %}
+              {% endcall %}
+            {% endif %}
+            {% if tx.account_id != primary_acc_id %}<span class="pill" style="color:var(--text-tertiary)">{{ tx.account.name }}</span>{% endif %}
+          </span>
+          {# Ohne „CHF" je Zeile: das Kürzel kostet auf 375px rund 34px, die der
+             Beschreibung fehlen — die Währung nennt die Leitzahl der Seite. #}
+          {% if tx.amount >= 0 %}
+            <span class="tx-amount" style="color:{{ 'var(--accent-secondary)' if is_transfer else 'var(--accent-tertiary)' }}">+{{ tx.amount | chf_wert }}</span>
+          {% else %}
+            <span class="tx-amount">−{{ (tx.amount.copy_abs()) | chf_wert }}</span>
+          {% endif %}
+          <span class="tx-actions">
+            {% call row_menu() %}
+              {% if not is_transfer %}
+                <button type="button" class="rowmenu-item" role="menuitem"
+                        hx-get="/transactions?form=edit&id={{ tx.id }}"
+                        hx-target="#transactions-root" hx-swap="innerHTML" hx-include="#tx-filter">{{ icon('pencil') }} Bearbeiten</button>
+              {% endif %}
+              {# Filter mitsenden (hx-include): sonst rendert die Antwort die UNGEFILTERTE
+                 Liste, während das hx-preserve-Suchfeld den alten Text weiter anzeigt. #}
+              <button type="button" class="rowmenu-item danger" role="menuitem"
+                      hx-post="/transactions/{{ tx.id }}/delete"
+                      hx-target="#transactions-root" hx-swap="innerHTML" hx-include="#tx-filter"
+                      hx-confirm="{% if is_transfer %}Umbuchung über {{ tx.amount.copy_abs() | chf }} löschen? BEIDE Seiten des Transfers werden entfernt — kann nicht rückgängig gemacht werden.{% else %}Buchung „{{ tx.description or 'ohne Beschreibung' }}“ über {{ tx.amount.copy_abs() | chf }} vom {{ tx.date.strftime('%d.%m.%Y') }} löschen? Kann nicht rückgängig gemacht werden.{% endif %}">{{ icon('trash') }} Löschen</button>
+            {% endcall %}
+          </span>
+          {% if lohn %}
+            {% with a = lohn %}{% include "partials/lohn_block.html" %}{% endwith %}
+          {% elif beleg_posten %}
+            {% with posten = beleg_posten %}{% include "partials/beleg_posten.html" %}{% endwith %}
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  </details>
+{% endfor %}
+{% if next_before %}
+  <div class="tx-loadmore" id="tx-loadmore" style="text-align:center;padding:10px 0">
+    <button type="button" class="btn"
+            hx-get="/transactions?before={{ next_before }}&q={{ filter.q | urlencode }}&account_id={{ filter.account_id }}&category_id={{ filter.category_id }}&kind={{ filter.kind }}&only_receipts={{ 1 if filter.only_receipts else 0 }}&zeitraum={{ filter.zeitraum }}"
+            hx-target="#tx-loadmore" hx-swap="outerHTML">Ältere Monate laden</button>
+  </div>
+{% endif %}

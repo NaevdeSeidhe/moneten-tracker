@@ -1,0 +1,15 @@
+{% extends "_shell.html" %}
+{% block title %}Kategorien verwalten — Moneten-Tracker{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div>
+    <h1 class="hero-greeting">Kategorien verwalten</h1>
+  </div>
+  <a class="btn btn-ghost" href="/settings">← Einstellungen</a>
+</div>
+
+<div id="categories-root">
+  {% include "partials/categories_root.html" %}
+</div>
+{% endblock %}

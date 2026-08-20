@@ -1,0 +1,85 @@
+{# Kategorie-Picker in zwei Teilen: viele kleine AUSLÖSER, EIN gemeinsames PANEL.
+
+   Der Auslöser (`cat_picker`) ist nur Knopf + Hidden-Input und steht überall dort,
+   wo eine Kategorie gewählt wird (Buchungszeile, Filter, Inbox, Formulare).
+   Die Pillen (`cat_panel`) stehen genau EINMAL pro Seite — in `_shell.html`,
+   ausserhalb aller HTMX-Ziele.
+
+   Warum nicht das Panel je Auslöser rendern (die naheliegende Variante)?
+   54 Kategorien × 81 Zeilen sind nachgerechnet 1136 KB Markup pro Seite. Genau
+   deshalb hatte die Buchungsliste früher einen Server-Roundtrip (`?quickcat=`),
+   der das Panel in genau einer Zeile nachlieferte — und weil „offen" damit nur
+   im URL-Parameter stand, warf jedes weitere Neurendern der Liste (nachlaufende
+   Suche, Filterwechsel) den Picker wieder zu. Das gemeinsame Panel löst beides:
+   es kostet einmal, und es liegt ausserhalb von allem, was neu gerendert wird.
+
+   Der Vertrag zum Server bleibt unverändert: die Auswahl schreibt die id ins
+   Hidden-Input und feuert dort ein `change` — daran hängt HTMX (hx-get/hx-post).
+#}
+
+{# ----------  Auslöser  ----------------------------------------------------
+   Params:
+   * name        — Feldname des Hidden-Inputs (z.B. "category_id")
+   * groups      — [(top_name, [(id, name, icon), …]), …] — hier NUR, um die
+                   Beschriftung der aktuellen Auswahl nachzuschlagen
+   * selected    — aktuell gewählte id (oder "" / None)
+   * none_label  — Text der „alles/keine"-Pille (das Panel übernimmt ihn beim Öffnen)
+   * allow_none  — ob die „keine"-Pille gezeigt wird
+   * hx          — optionaler String mit hx-* Attributen fürs Hidden-Input
+   * autoopen    — Panel sofort aufklappen (Inbox: „zuordnen" → Auswahl steht da)
+   * key         — stabiler Schlüssel dieses Auslösers. Nur damit findet ein
+                   offenes Panel seinen Auslöser nach einem Neurendern wieder;
+                   ohne Schlüssel schliesst es beim Swap — bewusst so für Picker
+                   in Formularen, die es danach ohnehin nicht mehr gibt.
+#}
+{% macro cat_picker(name, groups, selected="", none_label="Alle Kategorien", allow_none=true, hx="", autoopen=false, key="") %}
+  {% set ns = namespace(label=none_label) %}
+  {% for _g, subs in groups %}
+    {% for cid, cname, _ic in subs %}
+      {% if selected is not none and selected != "" and (selected | string) == (cid | string) %}
+        {% set ns.label = cname %}
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+  {% call cat_trigger(name, selected=selected, none_label=none_label, allow_none=allow_none,
+                      hx=hx, autoopen=autoopen, key=key) %}
+    <span class="cat-picker-label">{{ ns.label }}</span>
+    <span class="cat-picker-caret" aria-hidden="true">▾</span>
+  {% endcall %}
+{% endmacro %}
+
+{# ----------  Auslöser mit eigenem Knopf-Inhalt  ---------------------------
+   Gleicher Vertrag, aber der Aufrufer bestimmt Aussehen und Inhalt des Knopfs.
+   Gebraucht von der Buchungsliste: dort IST der Knopf die Kategorie-Anzeige
+   (Icon + Name als Pille), ein zweites Feld daneben hätte in der Zeile keinen
+   Platz. Alles, was app.js kennen muss, steht trotzdem an EINER Stelle. #}
+{% macro cat_trigger(name, selected="", none_label="Alle Kategorien", allow_none=true, hx="", autoopen=false, key="", cls="", btn_cls="cat-picker-btn", btn_title="") %}
+  <div class="cat-picker{% if cls %} {{ cls }}{% endif %}"{% if autoopen %} data-autoopen="1"{% endif %}{% if key %} data-picker-key="{{ key }}"{% endif %}
+       data-none-label="{{ none_label }}" data-allow-none="{{ 1 if allow_none else 0 }}">
+    <input type="hidden" name="{{ name }}" value="{{ selected if selected is not none else '' }}" {{ hx | safe }}>
+    <button type="button" class="{{ btn_cls }}"{% if btn_title %} title="{{ btn_title }}"{% endif %}>{{ caller() }}</button>
+  </div>
+{% endmacro %}
+
+{# ----------  Das eine, gemeinsame Panel  ----------------------------------
+   Wird von `_shell.html` genau einmal gerendert. `position: fixed` — platziert
+   wird es von app.js (initCatPicker) am jeweiligen Auslöser. Die „keine/alle"-
+   Pille bekommt ihre Beschriftung ebenfalls erst beim Öffnen: sie unterscheidet
+   sich je Einsatzort („Alle Kategorien" im Filter, „— keine —" in der Zeile).
+#}
+{% macro cat_panel(groups) %}
+  <div class="cat-picker-panel card" id="cat-panel" hidden>
+    <input type="text" class="cat-picker-search" autocomplete="off" aria-label="Kategorie suchen"
+           placeholder="Filtern…">
+    <div class="cat-picker-empty" hidden>Keine Kategorie passt.</div>
+    <button type="button" class="cat-pill cat-picker-none" data-cat="" data-label=""></button>
+    {% for gname, subs in groups %}
+      <div class="cat-picker-group">{{ gname }}</div>
+      <div class="cat-pill-row">
+        {% for cid, cname, cicon in subs %}
+          <button type="button" class="cat-pill" data-cat="{{ cid }}" data-label="{{ cname }}">{{ icon(cicon) }} {{ cname }}</button>
+        {% endfor %}
+      </div>
+    {% endfor %}
+  </div>
+{% endmacro %}

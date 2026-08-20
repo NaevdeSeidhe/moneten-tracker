@@ -1,0 +1,137 @@
+{# Inhalt von #categories-root: Formular (neu/bearbeiten) + Kategorie-Baum. #}
+{% if message %}<div class="feedback ok" style="margin-bottom:16px">{{ message }}</div>{% endif %}
+{% if error %}<div class="feedback err" style="margin-bottom:16px">{{ error }}</div>{% endif %}
+
+{% if form_mode in ("new", "edit") %}
+  {% set editing = (form_mode == "edit") %}
+  {% set post_url = ("/categories/" ~ edit_cat.id) if editing else "/categories" %}
+  <form class="card sunken mb-4" id="cat-form" hx-post="{{ post_url }}"
+        hx-target="#categories-root" hx-swap="innerHTML">
+    <div class="label-cap card-head">{{ "Kategorie bearbeiten" if editing else "Neue Kategorie" }}</div>
+
+    {# fv = Rohwerte nach einem Validierungsfehler; sie gewinnen über die
+       Bearbeitungswerte, sonst tippt man alles neu. #}
+    {% set fv = form_values or {} %}
+    <div class="grid-2" style="gap:14px">
+      <div>
+        <label for="cat-name">Name</label>
+        <input id="cat-name" name="name" class="full-w" required
+               value="{{ fv.get('name') or (edit_cat.name if editing else '') }}" placeholder="z.B. Gaming">
+      </div>
+      <div>
+        <label for="cat-parent">Oberkategorie</label>
+        <select id="cat-parent" name="parent_id" class="full-w" data-art-toggle>
+          <option value="">— eigene Top-Kategorie —</option>
+          {% for tid, tname in top_choices %}
+            <option value="{{ tid }}" {% if (fv.get('parent_id')|string == tid|string) or (not fv.get('parent_id') and editing and edit_cat.parent_id == tid) %}selected{% endif %}>{{ tname }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div id="cat-art-field">
+        <label for="cat-art">Art (nur für Top-Kategorie)</label>
+        <select id="cat-art" name="art" class="full-w">
+          {% for code, label in art_choices %}
+            <option value="{{ code }}"
+              {% if (fv.get('art') == code) or (not fv.get('art') and editing and edit_cat.parent_id is none and edit_cat.management_type and edit_cat.management_type.value == code) %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="cat-colorpick" data-colorpick>
+        <label>Farbe (optional)</label>
+        <input type="hidden" name="color" value="{{ edit_cat.color or '' }}">
+        <div class="cat-swatches">
+          <button type="button" class="cat-swatch cat-swatch-none {% if not (editing and edit_cat.color) %}active{% endif %}" data-color="" title="keine Farbe">∅</button>
+          {# farb_auswahl kommt aus moneten.palette — eine Kopie hier lief der
+             Palette davon (siehe routers/categories.py). #}
+          {% for hexc in farb_auswahl %}
+            <button type="button" class="cat-swatch {% if editing and edit_cat.color == hexc %}active{% endif %}"
+                    data-color="{{ hexc }}" style="background:{{ hexc }}" title="{{ hexc }}"></button>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    {# ---- Icon-Picker: Suchfeld + Raster (75 Icons, currentColor) ---- #}
+    <label style="margin-top:16px;display:block">Icon</label>
+    <div class="iconpick" data-iconpick>
+      <input type="hidden" name="icon" value="{{ (edit_cat.icon if editing else '') or 'tag' }}">
+      <div class="iconpick-head">
+        <span class="iconpick-current">{{ icon((edit_cat.icon if editing else '') or 'tag') }}<span class="iconpick-name">{{ (edit_cat.icon if editing else '') or 'tag' }}</span></span>
+        <input type="search" class="iconpick-search" autocomplete="off"
+               placeholder="Icon suchen… (z.B. auto, essen, sport)" aria-label="Icon suchen">
+      </div>
+      <div class="iconpick-grid">
+        {% for ic in icons %}
+          <button type="button" class="iconpick-opt {% if ((edit_cat.icon if editing else '') or 'tag') == ic.name %}active{% endif %}"
+                  data-name="{{ ic.name }}" data-keywords="{{ ic.keywords }} {{ ic.label | lower }}"
+                  title="{{ ic.label }}">{{ icon(ic.name) }}</button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="flex gap-2 mt-4" style="flex-wrap:wrap">
+      <button type="submit" class="btn btn-primary">{{ "Speichern" if editing else "Anlegen" }}</button>
+      <button type="button" class="btn btn-ghost"
+              hx-get="/categories?form=none" hx-target="#categories-root" hx-swap="innerHTML">Abbrechen</button>
+      {% if editing %}
+        <button type="button" class="btn btn-ghost" style="margin-left:auto;color:var(--danger)"
+                hx-post="/categories/{{ edit_cat.id }}/delete" hx-target="#categories-root" hx-swap="innerHTML"
+                hx-confirm="Kategorie „{{ edit_cat.name }}" wirklich löschen? (nur möglich ohne Buchungen/Unterkategorien)">Löschen</button>
+      {% endif %}
+    </div>
+  </form>
+{% else %}
+  <div class="flex items-center justify-between mb-4" style="gap:10px;flex-wrap:wrap">
+    <div class="label-cap" style="font-size:18px">Deine Kategorien</div>
+    <button class="btn btn-primary"
+            hx-get="/categories?form=new" hx-target="#categories-root" hx-swap="innerHTML">+ Kategorie</button>
+  </div>
+{% endif %}
+
+{# ----------  Kategorie-Baum (Top + Unterkategorien)  ---------- #}
+{% for top in tree %}
+  <div class="cat-top {% if top.is_archived %}is-archived{% endif %}">
+    <div class="cat-top-head">
+      <span class="cat-top-name">{{ icon(top.icon) }}<strong>{{ top.name }}</strong>
+        <span class="muted text-sm">· {{ top.mgmt }}{% if top.is_archived %} · archiviert{% endif %}</span></span>
+      <span class="cat-actions">
+        <button class="icon-action" title="Bearbeiten" aria-label="Bearbeiten"
+                hx-get="/categories?form=edit&id={{ top.id }}" hx-target="#categories-root" hx-swap="innerHTML">{{ icon('pencil') }}</button>
+        {% if top.is_archived %}
+          <button class="icon-action" title="Aktivieren" aria-label="Aktivieren"
+                  hx-post="/categories/{{ top.id }}/unarchive" hx-target="#categories-root" hx-swap="innerHTML">{{ icon('rotate') }}</button>
+        {% else %}
+          <button class="icon-action" title="Archivieren" aria-label="Archivieren"
+                  hx-post="/categories/{{ top.id }}/archive" hx-target="#categories-root" hx-swap="innerHTML">{{ icon('archive') }}</button>
+        {% endif %}
+        <button class="icon-action danger" title="Löschen" aria-label="Löschen"
+                hx-post="/categories/{{ top.id }}/delete" hx-target="#categories-root" hx-swap="innerHTML"
+                hx-confirm="„{{ top.name }}" löschen? (nur ohne Buchungen/Unterkategorien)">{{ icon('trash') }}</button>
+      </span>
+    </div>
+    {% if top.subs %}
+      <div class="cat-subs">
+        {% for s in top.subs %}
+          <div class="cat-sub {% if s.is_archived %}is-archived{% endif %}">
+            <span class="cat-sub-name">{{ icon(s.icon) }}{{ s.name }}</span>
+            <span class="muted text-sm cat-sub-meta">{{ s.tx_count }} Buchung(en){% if s.is_archived %} · archiviert{% endif %}</span>
+            <span class="cat-actions">
+              <button class="icon-action" title="Bearbeiten / Umhängen" aria-label="Bearbeiten"
+                      hx-get="/categories?form=edit&id={{ s.id }}" hx-target="#categories-root" hx-swap="innerHTML">{{ icon('pencil') }}</button>
+              {% if s.is_archived %}
+                <button class="icon-action" title="Aktivieren" aria-label="Aktivieren"
+                        hx-post="/categories/{{ s.id }}/unarchive" hx-target="#categories-root" hx-swap="innerHTML">{{ icon('rotate') }}</button>
+              {% else %}
+                <button class="icon-action" title="Archivieren" aria-label="Archivieren"
+                        hx-post="/categories/{{ s.id }}/archive" hx-target="#categories-root" hx-swap="innerHTML">{{ icon('archive') }}</button>
+              {% endif %}
+              <button class="icon-action danger" title="Löschen" aria-label="Löschen"
+                      hx-post="/categories/{{ s.id }}/delete" hx-target="#categories-root" hx-swap="innerHTML"
+                      hx-confirm="„{{ s.name }}" löschen? (nur ohne Buchungen)">{{ icon('trash') }}</button>
+            </span>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+{% endfor %}

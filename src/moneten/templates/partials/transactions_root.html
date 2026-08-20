@@ -1,0 +1,462 @@
+{# Kompletter Inhalt des #transactions-root-Containers: optionales Formular +
+   Buchungsliste. Wird vom transactions-Router bei jeder Aktion neu gerendert. #}
+{% from "partials/cat_picker.html" import cat_picker %}
+{% from "partials/row_menu.html" import row_menu %}
+
+{% set editing = (form_mode == "edit") %}
+
+<div class="card">
+  {# S7: kein doppelter „Buchungen"-Titel (steht schon als Seiten-H1). Nur die
+     Aktionen, rechtsbündig. #}
+  {% if form_mode == "none" %}
+    <div class="flex gap-2" style="justify-content:flex-end;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn"
+              hx-get="/transactions?form=transfer"
+              hx-target="#transactions-root" hx-swap="innerHTML">↔ Umbuchen</button>
+      {# „Buchung" stand schon in der Seitenüberschrift. Mit dem kürzeren Wort
+         passen beide Knöpfe nebeneinander: vorher (136 + 185 px) waren sie 14 px
+         zu breit für die Karte und stapelten sich zu zwei Reihen à 48 px. #}
+      <button class="btn btn-primary"
+              hx-get="/transactions?form=new"
+              hx-target="#transactions-root" hx-swap="innerHTML">+ Erfassen</button>
+    </div>
+  {% endif %}
+
+  {% if error %}
+    <div class="feedback err" style="margin-bottom:14px">{{ error }}</div>
+  {% endif %}
+  {% if info %}
+    <div class="banner-ok" style="margin-bottom:14px">✓ {{ info }}</div>
+  {% endif %}
+
+  {# ----------  Erfassungs-/Bearbeitungs-Formular  ---------- #}
+  {% if form_mode in ("new", "edit") %}
+    {% set post_url = ("/transactions/" ~ edit_tx.id) if editing else "/transactions" %}
+    {# fv = die zuletzt eingetippten Rohwerte. Nach einem Validierungsfehler war
+       das Formular vorher LEER — man musste alles neu tippen, obwohl nur ein Feld
+       falsch war. Die Werte gewinnen deshalb über Bearbeitungs- und Vorgabewerte. #}
+    {% set fv = form_values or {} %}
+    {% set cur_kind = fv.get('kind') or ("einnahme" if (editing and edit_tx.amount >= 0) else "ausgabe") %}
+    <form class="card sunken" style="margin-bottom:18px"
+          hx-post="{{ post_url }}" hx-target="#transactions-root" hx-swap="innerHTML">
+      <div class="label-cap card-head">{{ "Buchung bearbeiten" if editing else "Neue Buchung" }}</div>
+
+      {# Ausgabe / Einnahme Umschalter #}
+      <div class="seg" style="margin-bottom:14px">
+        <label class="seg-opt">
+          <input type="radio" name="kind" value="ausgabe" {% if cur_kind == 'ausgabe' %}checked{% endif %}>
+          <span>Ausgabe</span>
+        </label>
+        <label class="seg-opt">
+          <input type="radio" name="kind" value="einnahme" {% if cur_kind == 'einnahme' %}checked{% endif %}>
+          <span>Einnahme</span>
+        </label>
+      </div>
+
+      <div class="grid-2" style="gap:14px">
+        <div>
+          <label for="tx-amount">Betrag</label>
+          <input id="tx-amount" name="amount" class="full-w" inputmode="decimal" required
+                 value="{{ fv.get('amount') or ('%.2f'|format(edit_tx.amount.copy_abs()) if editing else '') }}"
+                 placeholder="z.B. 42.50">
+        </div>
+        <div>
+          <label for="tx-date">Datum</label>
+          <input id="tx-date" name="date" type="date" class="full-w" required
+                 value="{{ fv.get('date') or (edit_tx.date.isoformat() if editing else today) }}">
+        </div>
+        <div>
+          <label for="tx-account">Konto</label>
+          <select id="tx-account" name="account_id" class="full-w" required>
+            {% for acc in accounts %}
+              <option value="{{ acc.id }}"
+                {% if (fv.get('account_id')|string == acc.id|string) or (not fv.get('account_id') and editing and edit_tx.account_id == acc.id) %}selected{% endif %}>{{ acc.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Kategorie</label>
+          {{ cat_picker("category_id", category_groups,
+                        selected=(fv.get('category_id') or (edit_tx.category_id if editing else "")),
+                        none_label="— keine —") }}
+        </div>
+        <div style="grid-column:1 / -1">
+          <label for="tx-desc">Beschreibung</label>
+          <input id="tx-desc" name="description" class="full-w"
+                 value="{{ fv.get('description') or (edit_tx.description if editing else '') }}"
+                 placeholder="z.B. Migros Einkauf">
+        </div>
+        {% if editing %}
+          {# Lern-Regel: aus der gewählten Kategorie eine Regel ableiten und gleich
+             auf alle weiteren unkategorisierten Buchungen mit dem Stichwort anwenden. #}
+          <div style="grid-column:1 / -1" class="card sunken" data-learn>
+            <label class="flex items-center gap-2" style="text-transform:none; letter-spacing:0; color:var(--text-secondary)">
+              <input type="checkbox" name="learn_rule" value="1" class="js-learn-toggle">
+              <strong>Als Regel merken</strong>
+            </label>
+            <input name="learn_keyword" class="full-w" style="margin-top:8px" disabled
+                   value="{{ learn_keyword }}" placeholder="Stichwort, z.B. coop">
+          </div>
+        {% endif %}
+        <div style="grid-column:1 / -1">
+          <label for="tx-notes">Notiz (optional)</label>
+          <input id="tx-notes" name="notes" class="full-w"
+                 value="{{ fv.get('notes') or (edit_tx.notes or '' if editing else '') }}">
+        </div>
+      </div>
+
+      <div class="flex gap-2 mt-4">
+        <button type="submit" class="btn btn-primary">{{ "Speichern" if editing else "Buchen" }}</button>
+        <button type="button" class="btn btn-ghost"
+                hx-get="/transactions?form=none" hx-target="#transactions-root" hx-swap="innerHTML">Abbrechen</button>
+      </div>
+    </form>
+
+    {# Quittungs-Bereich — Referenz auf eine Datei im Quittungs-Ordner (kein Upload) #}
+    {% if editing %}
+      <div class="card sunken" style="margin-bottom:18px">
+        <div class="label-cap card-head">Quittung / Beleg</div>
+        {% if edit_attachments %}
+          {% for att in edit_attachments %}
+            {% set meta = att.parsed_items_json | fromjson %}
+            <div class="row">
+              {% if att.file_path %}
+                <a href="/transactions/attachment/{{ att.id }}" target="_blank" rel="noopener">{{ icon('receipt') }} {{ att.original_name }}</a>
+              {% else %}
+                <span>{{ icon('receipt') }} {{ att.original_name }} <span class="muted text-sm">(im Ordner suchen)</span></span>
+              {% endif %}
+              <span class="flex items-center gap-3">
+                {# Das „≈" gilt für geschätzte Beträge. Der Betrag einer gelesenen
+                   Rechnung ist keiner: er steht in ihrer Betragsspalte und ist
+                   gegen die Summe ihrer Positionen geprüft. #}
+                {% if meta.amount %}
+                  {% set quelle = {'text-layer': 'Text-Layer', 'ocr': 'OCR', 'rechnung': 'Rechnung'}.get(meta.method, '—') %}
+                  <span class="mono text-sm" title="{{ 'Rechnungsbetrag' if meta.method == 'rechnung' else 'erkannter Betrag' }} · Quelle: {{ quelle }}">{% if meta.method != 'rechnung' %}≈ {% endif %}{{ meta.amount | chf }}</span>
+                {% endif %}
+                {% if att.file_path %}
+                  <button class="btn btn-ghost text-sm"
+                          hx-post="/transactions/attachment/{{ att.id }}/ocr"
+                          hx-target="#transactions-root" hx-swap="innerHTML">Text neu auslesen</button>
+                {% endif %}
+                <button class="btn btn-ghost text-sm" style="color:var(--danger)"
+                        hx-post="/transactions/attachment/{{ att.id }}/delete"
+                        hx-target="#transactions-root" hx-swap="innerHTML"
+                        hx-confirm="Zuordnung entfernen? (Original-Datei bleibt erhalten)">Entfernen</button>
+              </span>
+            </div>
+            {% if att.ocr_text %}
+              <div class="receipt-preview">{{ att.ocr_text[:1500] }}</div>
+            {% elif att.file_path %}
+              <div class="text-sm muted" style="margin-top:6px">Kein Text erkannt.</div>
+            {% endif %}
+          {% endfor %}
+        {% else %}
+          <div class="muted text-sm" style="margin-bottom:12px">Noch keine Quittung zugeordnet.</div>
+        {% endif %}
+
+        <form hx-post="/transactions/{{ edit_tx.id }}/attachment"
+              hx-target="#transactions-root" hx-swap="innerHTML" class="mt-4">
+          {% if available_receipts %}
+            <label>Quittung aus dem Ordner</label>
+            {# Durchsuchbare Liste statt langer Dropdown: tippen filtert, klicken wählt. #}
+            <div class="rcpt-picker" data-rcpt>
+              <input type="hidden" name="filename" value="">
+              <input type="search" class="rcpt-search full-w" autocomplete="off"
+                     placeholder="Dateiname suchen…" aria-label="Quittung suchen">
+              <div class="rcpt-options" role="listbox">
+                <button type="button" class="rcpt-opt rcpt-none active" data-name="">— keine Quittung —</button>
+                {% for r in available_receipts %}
+                  <button type="button" class="rcpt-opt" data-name="{{ r.name }}">{{ r.name }}{% if r.parsed_date %} <span class="muted">· {{ r.parsed_date.strftime('%d.%m.%Y') }}</span>{% endif %}</button>
+                {% endfor %}
+              </div>
+              <div class="flex gap-2 items-center mt-4">
+                <span class="rcpt-chosen muted text-sm">Keine ausgewählt</span>
+                <button type="submit" class="btn">Zuordnen</button>
+              </div>
+            </div>
+          {% else %}
+            <label for="rcpt-name">Dateiname der Quittung</label>
+            <div class="flex gap-2 items-center">
+              <input id="rcpt-name" name="filename" class="full-w" placeholder="z.B. 20260515_Migros.pdf">
+              <button type="submit" class="btn">Vermerken</button>
+            </div>
+            <div class="muted text-sm mt-4">Kein Quittungs-Ordner konfiguriert.</div>
+          {% endif %}
+        </form>
+      </div>
+
+      {# ----------  Aufteilung (Auto-Split): Buchung auf mehrere Kategorien  ---------- #}
+      <div class="card sunken" style="margin-bottom:18px" id="split-editor"
+           data-split-target="{{ '%.2f'|format(edit_tx.amount.copy_abs()) }}">
+        <div class="flex items-center justify-between" style="margin-bottom:8px">
+          <div class="label-cap">Aufteilung in Kategorien</div>
+          {% if has_receipt_ocr %}
+            <button type="button" class="btn btn-ghost text-sm"
+                    hx-post="/transactions/{{ edit_tx.id }}/split/suggest"
+                    hx-target="#transactions-root" hx-swap="innerHTML">{{ icon('bolt') }} Auto-Split aus Beleg</button>
+          {% endif %}
+        </div>
+        {% if split_note %}
+          <div class="text-sm" style="margin-bottom:10px; padding:8px 10px; border:1px solid var(--border-emphasis); border-radius:8px; color:var(--text-secondary)">{{ split_note }}</div>
+        {% endif %}
+
+        <form id="split-form" hx-post="/transactions/{{ edit_tx.id }}/split"
+              hx-target="#transactions-root" hx-swap="innerHTML">
+          <div id="split-rows">
+            {% for row in split_rows %}
+              <div class="split-row">
+                {{ cat_picker("split_cat", category_groups, selected=row.category_id,
+                              none_label="Kategorie wählen", allow_none=false) }}
+                <input name="split_amount" class="split-amount" inputmode="decimal"
+                       value="{{ row.amount }}" placeholder="0.00">
+                <button type="button" class="icon-action danger split-del"
+                        title="Position entfernen" aria-label="Position entfernen">{{ icon('trash') }}</button>
+              </div>
+            {% endfor %}
+          </div>
+          <div class="flex items-center justify-between" style="margin-top:10px; flex-wrap:wrap; gap:10px">
+            <button type="button" class="btn btn-ghost text-sm" id="split-add">+ Position</button>
+            <div class="split-remainder" id="split-remainder" aria-live="polite"></div>
+          </div>
+          <div class="flex gap-2 mt-4">
+            <button type="submit" class="btn btn-primary">Aufteilung speichern</button>
+            {% if edit_tx.is_split %}
+              <button type="button" class="btn btn-ghost" style="color:var(--danger)"
+                      hx-post="/transactions/{{ edit_tx.id }}/split/clear"
+                      hx-target="#transactions-root" hx-swap="innerHTML"
+                      hx-confirm="Aufteilung aufheben?">Aufteilung aufheben</button>
+            {% endif %}
+          </div>
+        </form>
+
+        {# Vorlage-Zeile für „+ Position" (JS klont sie und bindet den Picker neu). #}
+        <template id="split-row-tpl">
+          <div class="split-row">
+            {{ cat_picker("split_cat", category_groups, selected="",
+                          none_label="Kategorie wählen", allow_none=false) }}
+            <input name="split_amount" class="split-amount" inputmode="decimal" placeholder="0.00">
+            <button type="button" class="icon-action danger split-del"
+                    title="Position entfernen" aria-label="Position entfernen">{{ icon('trash') }}</button>
+          </div>
+        </template>
+      </div>
+
+      {# ----------  Lohnzusammensetzung (nur bei Einnahmen)  ---------- #}
+      {% if lohn_moeglich %}{% include "partials/lohn_editor.html" %}{% endif %}
+    {% endif %}
+  {% endif %}
+
+  {# ----------  Transfer-/Umbuchungs-Formular  ---------- #}
+  {% if form_mode == "transfer" %}
+    <form class="card sunken" style="margin-bottom:18px"
+          hx-post="/transactions/transfer" hx-target="#transactions-root" hx-swap="innerHTML">
+      <div class="label-cap card-head">Umbuchung zwischen Konten</div>
+      {# Das Beispiel („Bargeldbezug aufs Kassen-Konto") steht als Platzhalter im
+         Notizfeld desselben Formulars. Was NICHT irgendwo ablesbar ist: dass eine
+         Umbuchung die Ausgaben-Statistik nicht anfasst — der Satz bleibt. #}
+      <div class="muted text-sm" style="margin-bottom:14px">Zählt nicht als Ausgabe.</div>
+      <div class="grid-2" style="gap:14px">
+        <div>
+          <label for="tr-from">Von Konto</label>
+          <select id="tr-from" name="from_account_id" class="full-w" required>
+            {% for acc in accounts %}<option value="{{ acc.id }}">{{ acc.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="tr-to">Auf Konto</label>
+          <select id="tr-to" name="to_account_id" class="full-w" required>
+            {% for acc in accounts %}<option value="{{ acc.id }}" {% if loop.index == 2 %}selected{% endif %}>{{ acc.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="tr-amount">Betrag</label>
+          <input id="tr-amount" name="amount" class="full-w" inputmode="decimal" required placeholder="z.B. 200.00">
+        </div>
+        <div>
+          <label for="tr-date">Datum</label>
+          <input id="tr-date" name="date" type="date" class="full-w" required value="{{ today }}">
+        </div>
+        <div style="grid-column:1 / -1">
+          <label for="tr-notes">Notiz (optional)</label>
+          <input id="tr-notes" name="notes" class="full-w" placeholder="z.B. Bargeld für die Woche">
+        </div>
+      </div>
+      <div class="flex gap-2 mt-4">
+        <button type="submit" class="btn btn-primary">Umbuchen</button>
+        <button type="button" class="btn btn-ghost"
+                hx-get="/transactions?form=none" hx-target="#transactions-root" hx-swap="innerHTML">Abbrechen</button>
+      </div>
+    </form>
+  {% endif %}
+
+  {# ----------  Filter + Zusammenfassung + Monatskarten  ---------- #}
+  {% if form_mode == "none" %}
+    <div class="tx-filter" id="tx-filter">
+      {# hx-preserve hält das Feld (Fokus + Tippcursor) über die HTMX-Swaps hinweg,
+         sonst würde es bei jedem Tastendruck neu erzeugt und der Fokus ginge verloren. #}
+      <input id="tx-search" hx-preserve="true" class="tx-search" type="search" name="q"
+             value="{{ filter.q }}" placeholder="Beschreibung suchen…"
+             hx-get="/transactions" hx-target="#transactions-root" hx-swap="innerHTML" hx-include="#tx-filter"
+             hx-trigger="keyup changed delay:400ms, search">
+      {# Konto/Kategorie/Typ liegen hinter einem Aufklapper: offen belegten die
+         fünf Bedienelemente zwei volle 44px-Reihen über der Liste, obwohl im
+         Normalfall gar nicht gefiltert wird. Bewusst natives <details> statt JS
+         — kein Inline-Script (CSP), nichts neu zu binden nach HTMX-Swaps.
+         Wichtig: die Felder bleiben auch zugeklappt im DOM, `hx-include`
+         schickt sie also unverändert mit. Ist ein Filter aktiv, startet der
+         Block offen, damit nie unsichtbar gefiltert wird. #}
+      <details class="txf-more" {% if filter.account_id or filter.category_id or filter.kind %}open{% endif %}>
+        <summary class="txf-more-head">{{ icon('settings') }} Filter</summary>
+        <div class="txf-more-body">
+          <select name="account_id" aria-label="Konto" hx-get="/transactions" hx-target="#transactions-root" hx-swap="innerHTML" hx-include="#tx-filter" hx-trigger="change">
+            <option value="">Alle Konten</option>
+            {% for acc in accounts %}
+              <option value="{{ acc.id }}" {% if filter.account_id == acc.id %}selected{% endif %}>{{ acc.name }}</option>
+            {% endfor %}
+          </select>
+          {# key: der Filter sitzt IM neu gerenderten #transactions-root. Ohne
+             Schlüssel fände ein offenes Panel seinen Auslöser nach dem Swap
+             nicht wieder und müsste zumachen. #}
+          {{ cat_picker("category_id", category_groups, selected=filter.category_id,
+                        none_label="Alle Kategorien", key="filter-cat",
+                        hx='hx-get="/transactions" hx-target="#transactions-root" hx-swap="innerHTML" hx-include="#tx-filter" hx-trigger="change"') }}
+          <select name="kind" aria-label="Buchungstyp" hx-get="/transactions" hx-target="#transactions-root" hx-swap="innerHTML" hx-include="#tx-filter" hx-trigger="change">
+            <option value="">Alle Typen</option>
+            <option value="einnahme" {% if filter.kind == 'einnahme' %}selected{% endif %}>Einnahmen</option>
+            <option value="ausgabe" {% if filter.kind == 'ausgabe' %}selected{% endif %}>Ausgaben</option>
+            <option value="transfer" {% if filter.kind == 'transfer' %}selected{% endif %}>Transfers</option>
+          </select>
+        </div>
+      </details>
+      {# Belegfilter: Hidden-Feld hält den Zustand (wird von allen Filtern mitgesendet),
+         der Knopf schaltet es per JS um und löst HTMX aus (CSP-konform, kein Inline-JS). #}
+      <input type="hidden" name="only_receipts" id="tx-only-receipts" value="{{ 1 if filter.only_receipts else 0 }}">
+      {# Zeitraum für Summe UND Liste (Vorgabe: laufendes Jahr). Steht hier im
+         #tx-filter, damit ihn jeder hx-include mitschickt — Suche,
+         Konto/Kategorie/Typ, Zeilen-Kategorie, Löschen und die Massen-Leiste.
+         Ohne dieses Feld fiele die Liste bei der nächsten Aktion auf die Vorgabe
+         zurück, während der Umschalter noch „Alle Jahre" zeigt. Als Feld des
+         Filters landet er zugleich im Gedächtnis (localStorage). #}
+      <input type="hidden" name="zeitraum" value="{{ zeitraum }}">
+      <div class="tx-filter-actions">
+        <button type="button" class="filter-toggle {% if filter.only_receipts %}active{% endif %}" id="tx-receipt-filter"
+                title="Nur Buchungen mit Beleg" aria-label="Nur Buchungen mit Beleg"
+                aria-pressed="{{ 'true' if filter.only_receipts else 'false' }}">{{ icon('receipt') }}<span class="ft-txt">Beleg</span></button>
+        {% if filter_active %}
+          <button class="btn btn-ghost text-sm" title="Filter zurücksetzen" id="tx-filter-reset"
+                  hx-get="/transactions" hx-target="#transactions-root" hx-swap="innerHTML">✕</button>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Zusammenfassung — Vorgabe: laufendes Jahr. Der Umschalter darüber gilt für
+       ALLES, was unter ihm steht: Summe, Massen-Leiste und Monatskarten. Bis
+       05.08.2026 waren es zwei Leisten, drei Zeilen auseinander, beide mit einem
+       Knopf „2026" — und sie durften verschiedene Zeiträume behaupten. Deshalb
+       steht er ganz oben und über die volle Breite: er ist die Bedingung der
+       Seite, nicht eine Einstellung dieses einen Kastens.
+
+       Die Zahl daneben ist der Grund, warum es ihn sichtbar geben muss: ohne sie
+       sähe die Jahres-Vorgabe wie ein Datenverlust aus. #}
+    <div class="tx-summary">
+      <div class="txs-head">
+        <div class="txs-seg tx-zeitraum" role="group" aria-label="Zeitraum der Liste">
+          {% for key in ("monat", "jahr", "alles") %}
+            <button type="button" class="txs-seg-btn {% if zeitraum == key %}on{% endif %}"
+                    aria-pressed="{{ 'true' if zeitraum == key else 'false' }}"
+                    hx-get="/transactions" hx-target="#transactions-root" hx-swap="innerHTML"
+                    hx-include="#tx-filter" hx-vals='{"zeitraum": "{{ key }}"}'>{{ zeitraum_labels[key] }}</button>
+          {% endfor %}
+        </div>
+        <span class="muted text-sm txs-zahl">{{ tx_summary.count }} Buchung{{ 'en' if tx_summary.count != 1 }}{% if ausserhalb %} · {{ ausserhalb }} ausserhalb{% endif %}</span>
+      </div>
+      {# Der Saldo ist die Leitzahl und steht ZUERST — vorher stand er als
+         kleines „Netto" unter den Balken und war damit die unauffälligste Zahl
+         des Blocks, obwohl er die eigentliche Antwort ist. #}
+      <div class="metric-label">{{ zeitraum_titel }}</div>
+      <div class="txs-net-num" data-countup="{{ tx_summary.net }}"
+           style="color:{{ 'var(--accent-tertiary)' if tx_summary.net >= 0 else 'var(--danger)' }}">{{ tx_summary.net | chf }}</div>
+      {% set _max = tx_summary.income if tx_summary.income > tx_summary.expense else tx_summary.expense %}
+      <div class="txs-bar-row">
+        <span class="txs-bar-cap">Ein</span>
+        <div class="txs-bar"><span class="txs-fill in" style="width:{{ ((tx_summary.income / _max * 100) | round(1)) if _max > 0 else 0 }}%"></span></div>
+        <span class="mono txs-val" style="color:var(--accent-tertiary)">+{{ tx_summary.income | chf_wert }}</span>
+      </div>
+      <div class="txs-bar-row">
+        <span class="txs-bar-cap">Aus</span>
+        <div class="txs-bar"><span class="txs-fill out" style="width:{{ ((tx_summary.expense / _max * 100) | round(1)) if _max > 0 else 0 }}%"></span></div>
+        <span class="mono txs-val" style="color:var(--dusty-rose)">−{{ tx_summary.expense | chf_wert }}</span>
+      </div>
+    </div>
+
+    {# Massen-Zuweisung — nur bei aktivem Filter. Ohne Filter wären „alle Treffer"
+       der ganze Bestand; die Leiste wäre dann keine Abkürzung, sondern eine Falle. #}
+    {% if bulk %}{% include "partials/tx_bulk.html" %}{% endif %}
+
+  {% endif %}
+
+  {% if month_groups %}
+    {# Monatsliste: ein Monat pro Karte, untereinander (absteigend). Jede Buchung
+       ist eine Tabellenzeile (Datum · Beschreibung · Kategorie+Konto · Betrag ·
+       Aktionen). Das grosse Jahr fährt im linken Rand mit (nur sehr breite Schirme). #}
+    {# B4: „Standard"-Konto = erstes aktives (nach sort_order, i.d.R. das Hauptkonto).
+       Die Konto-Pille zeigen wir nur, wenn die Buchung davon ABWEICHT — sonst stünde
+       auf jeder Zeile dasselbe Konto (Lärm). #}
+    <div class="tx-timeline">
+      <div class="tx-year" id="tx-year" aria-hidden="true">{{ month_groups[0].year }}</div>
+      <div class="tx-months" id="tx-months">
+        {# Monatskarten + „Ältere Monate laden" — geteiltes Partial, damit HTMX
+           (?before=…) weitere Monate mit identischem Markup nachladen kann. #}
+        {% include "partials/tx_months.html" %}
+      </div>
+    </div>
+  {% else %}
+    {% if filter_active %}
+      <div class="muted text-sm" style="padding:12px 0">
+        Keine Buchungen für diesen Filter{% if zeitraum_satz %} {{ zeitraum_satz }}{% endif %}.{% if ausserhalb %} {{ ausserhalb }} Treffer ausserhalb.{% endif %}
+      </div>
+    {% elif ausserhalb %}
+      {# Nicht der Einstiegs-Leitfaden: es GIBT Buchungen, nur nicht in diesem
+         Zeitraum. „So fängst du an" wäre hier schlicht falsch und liesse den
+         Nutzer glauben, sein Bestand sei weg. #}
+      <div class="muted text-sm" style="padding:12px 0">
+        Keine Buchungen {{ zeitraum_satz }} — {{ ausserhalb }} Buchung{{ 'en' if ausserhalb != 1 }} ausserhalb.
+      </div>
+    {% else %}
+      {# Die drei Knöpfe SIND der Einstieg — „So fängst du an:" kündigte an, was
+         eine Zeile tiefer ohnehin dasteht. #}
+      <div class="empty-guide">
+        <strong>Noch keine Buchungen.</strong>
+        <div class="flex">
+          <a class="btn btn-primary" href="/quick">Schnell erfassen</a>
+          <button class="btn" hx-get="/transactions?form=new" hx-target="#transactions-root" hx-swap="innerHTML">+ Buchung erfassen</button>
+          <a class="btn" href="/import">Bank-Auszug importieren</a>
+        </div>
+      </div>
+    {% endif %}
+  {% endif %}
+
+  {# Quittungs-Detail-Popup (ein gemeinsames Modal; JS füllt + öffnet es). #}
+  <div class="modal-overlay" id="receipt-modal" hidden>
+    <div class="modal-card">
+      <button type="button" class="modal-close" id="receipt-modal-close" aria-label="Schliessen">✕</button>
+      <div class="label-cap" style="margin-bottom:10px">Quittung · extrahiert</div>
+      {# Digitale Nachbildung einer Quittung (Monospace, hell + dunkel). #}
+      <div class="receipt-paper">
+        <div class="receipt-head"><span class="rline"></span><span id="receipt-merchant">Beleg</span><span class="rline"></span></div>
+        <div class="receipt-sub" id="receipt-sub"></div>
+        <pre class="receipt-body" id="receipt-modal-text"></pre>
+        <div class="receipt-total" id="receipt-total" hidden><span>TOTAL</span><span id="receipt-total-amount"></span></div>
+      </div>
+      {# Aufteilung (falls die Buchung aufgeteilt ist) — Kategorie + Anteil. #}
+      <div class="receipt-split" id="receipt-split" hidden>
+        <div class="receipt-split-title">Aufteilung</div>
+        <div id="receipt-split-rows"></div>
+      </div>
+      <div class="muted text-sm" id="receipt-modal-foot" style="margin-top:10px"></div>
+      <div class="flex gap-2" style="margin-top:14px">
+        <button type="button" class="btn btn-ghost text-sm" id="receipt-split-edit" hidden>In Kategorien aufteilen</button>
+      </div>
+    </div>
+  </div>
+</div>

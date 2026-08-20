@@ -1,0 +1,16 @@
+{# Ersetzt die Beleg-Karte nach erfolgreicher Zuordnung — hellgrün als klares Feedback. #}
+<div class="card assigned-ok" style="margin-bottom:16px">
+  <span class="flex items-center gap-2" style="flex-wrap:wrap">
+    <span style="color:var(--accent-tertiary)">✓ Zugeordnet</span>
+    {% if tx %}
+      <strong>{{ tx.date.strftime('%d.%m.%Y') }} · {{ tx.description or '(ohne Beschreibung)' }} · {{ tx.amount | chf }}</strong>
+    {% endif %}
+    <span class="muted text-sm">({{ filename }})</span>
+    {% if att_id %}
+    <form hx-post="/import/receipts/unassign" hx-target="closest .card" hx-swap="outerHTML" style="display:inline">
+      <input type="hidden" name="att_id" value="{{ att_id }}">
+      <button type="submit" class="btn btn-ghost btn-sm">↩ Rückgängig</button>
+    </form>
+    {% endif %}
+  </span>
+</div>

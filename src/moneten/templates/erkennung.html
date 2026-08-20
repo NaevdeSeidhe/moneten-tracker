@@ -1,0 +1,63 @@
+{% extends "_shell.html" %}
+{% block title %}Erkennung nachprüfen{% endblock %}
+{% block content %}
+<h1>Erkennung nachprüfen</h1>
+
+{% if meldung %}<div class="feedback ok mb-4">{{ meldung }}</div>{% endif %}
+
+{# Die eine Zeile, die man wirklich liest. #}
+<div class="card mb-4">
+  <div class="metric-label">{{ bilanz.gesamt }} Belege mit Rohtext</div>
+  <div class="topf-anteile">
+    <span class="topf-teil">gespeichert stimmig <span class="mono">{{ bilanz.alt_geht_auf }}</span></span>
+    <span class="topf-teil">heute stimmig <span class="mono">{{ bilanz.neu_geht_auf }}</span></span>
+    {% if bilanz.gewonnen %}
+      <span class="pill ist-gedeckt">{{ bilanz.gewonnen }} zu holen</span>
+    {% endif %}
+    {% if bilanz.verloren %}
+      <span class="pill ist-offen">{{ bilanz.verloren }} verschlechtert</span>
+    {% endif %}
+  </div>
+</div>
+
+{% if not befunde %}
+  <div class="card"><div class="muted">Noch kein Beleg mit Rohtext gespeichert.</div></div>
+{% else %}
+  <form method="post" action="/settings/erkennung">
+    {% for b in befunde %}
+      {# Verschlechterungen zuerst und markiert: sie sind der Grund, warum es
+         diese Seite gibt. Ein Beleg, der vorher stimmte und jetzt nicht mehr,
+         ist ein Fehler in der Erkennung, kein Fehler des Belegs. #}
+      <div class="card mb-4{{ ' unsicher' if b.verloren }}">
+        <div class="flex items-center justify-between">
+          <strong>{{ b.haendler }}</strong>
+          {% if b.verloren %}<span class="pill ist-offen">verschlechtert</span>
+          {% elif b.gewonnen %}<span class="pill ist-gedeckt">zu holen</span>{% endif %}
+        </div>
+        <div class="topf-anteile">
+          <span class="topf-teil">gespeichert
+            <span class="mono">{{ b.alt_total | chf_kurz if b.alt_total is not none else "–" }}</span>
+            · {{ b.alt_positionen }} Pos.{{ " ✓" if b.alt_geht_auf }}</span>
+          <span class="topf-teil">heute
+            <span class="mono">{{ b.neu_total | chf_kurz if b.neu_total is not none else "–" }}</span>
+            · {{ b.neu_positionen }} Pos.{{ " ✓" if b.neu_geht_auf }}</span>
+        </div>
+        {% if b.gewonnen %}
+          <label class="pos-zeile">
+            <input type="checkbox" name="beleg" value="{{ b.attachment_id }}" checked>
+            <span class="pos-name">neu auswerten</span>
+            <span></span>
+          </label>
+        {% endif %}
+        <details class="kz-roh">
+          <summary>Rohtext ({{ b.ocr_text | length }} Zeichen)</summary>
+          <pre>{{ b.ocr_text }}</pre>
+        </details>
+      </div>
+    {% endfor %}
+    {% if bilanz.gewonnen %}
+      <button type="submit" class="btn btn-primary">Gewählte neu auswerten</button>
+    {% endif %}
+  </form>
+{% endif %}
+{% endblock %}

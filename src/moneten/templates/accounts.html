@@ -1,0 +1,15 @@
+{% extends "_shell.html" %}
+{% block title %}Konten — Moneten-Tracker{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div>
+    <h1 class="hero-greeting">Konten</h1>
+  </div>
+</div>
+
+{# Ein Container — wird bei jeder Aktion komplett neu gerendert. #}
+<div id="accounts-root">
+  {% include "partials/accounts_root.html" %}
+</div>
+{% endblock %}

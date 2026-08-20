@@ -1,0 +1,27 @@
+{# Das Ergebnis einer Aufstellung: gerechneter Nettolohn, was aufs Konto kam,
+   und was dazwischen fehlt. Erwartet ``a`` = services.lohn.Aufstellung.
+
+   Von ZWEI Stellen eingebunden — vom Aufklapper an der Buchung
+   (lohn_block.html) und von der mitlaufenden Gegenprobe im Editor
+   (lohn_probe.html). Zweimal geschrieben liefen sie auseinander: der Aufklapper
+   zeigte „+116.01", die Vorschau für dieselben Zahlen „116.01", und die
+   Richtung blieb genau dort offen, wo der Nutzer entscheidet. #}
+<div class="lohn-summenzeile">
+  <span class="lohn-was">Nettolohn</span>
+  {# Die Ergebniszeile trägt die SCHWÄCHSTE Stufe der ganzen Aufstellung: eine
+     Summe ist nie genauer als ihr unsicherster Summand. #}
+  <span class="lohn-betrag">{% if a.netto_marke %}<span class="lohn-marke">{{ a.netto_marke }}</span> {% endif %}{{ a.netto | chf_wert }}</span>
+</div>
+<div class="lohn-posten">
+  <span class="lohn-was">auf dem Konto</span>
+  <span class="lohn-betrag">{{ a.gebucht | chf_wert }}</span>
+</div>
+{% if a.differenz != 0 %}
+  <div class="lohn-posten lohn-differenz{% if a.differenz_ist_fehler %} lohn-differenz-fehler{% endif %}">
+    <span class="lohn-was">Differenz</span>
+    {# Pluszeichen ausdruecklich: „Differenz 67.70" neben „Differenz −7.51" liess
+       offen, in welche Richtung es fehlt. `chf_wert` setzt nur das Minus, und
+       das Etikett benennt die Richtung nicht. #}
+    <span class="lohn-betrag">{% if a.differenz > 0 %}+{% endif %}{{ a.differenz | chf_wert }}</span>
+  </div>
+{% endif %}

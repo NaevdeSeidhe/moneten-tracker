@@ -1,0 +1,37 @@
+{# Wiederverwendbarer, abgerundeter Aufteilungs-Balken (wie die Donut-Segmente
+   auf der Übersicht, nur horizontal). Jedes Segment trägt — wenn breit genug —
+   sein Kategorie-Icon und zeigt beim Überfahren ein ans Theme angepasstes
+   Tooltip (kein Standard-Browser-title). Genutzt von Budget + Abos.
+
+   segments = Liste von {pct, color, icon, icon_color, label, value}
+   height   = Balkenhöhe in px (Default 34)
+   legend   = darunter eine erklärende Farb-Legende rendern (Default false) #}
+{% macro split_bar(segments, height=34, legend=false) %}
+<div class="split-bar" style="height:{{ height }}px">
+  {% for s in segments %}
+    <span class="split-seg" style="width:{{ s.pct }}%; background:{{ s.color }}"
+          tabindex="0" {# Betrag durch den chf-Filter: roh las der Screenreader „1234.50000" vor. #}
+          aria-label="{{ s.label }}: {{ s.value | chf }} ({{ s.pct }}%)">
+      {% if s.pct >= 6 and s.icon %}
+        <span class="split-ico" style="color:{{ s.icon_color }}">{{ icon(s.icon) }}</span>
+      {% endif %}
+      <span class="split-tip">
+        <span class="split-tip-name">{{ s.label }}</span>
+        <span class="split-tip-val">{{ s.value | chf }} · {{ s.pct }}%</span>
+      </span>
+    </span>
+  {% endfor %}
+</div>
+{% if legend %}
+  {# B7/B10: Legende erklärt die Farben — vorher waren die (teils sehr schmalen)
+     Segmente unbeschriftet und sahen wie zufällige Trenner aus. #}
+  <div class="split-legend">
+    {% for s in segments %}
+      <span class="split-legend-item">
+        <span class="split-legend-sw" style="background:{{ s.color }}"></span>
+        {{ s.label }}<span class="split-legend-val"> · {{ s.value | chf }}</span>
+      </span>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endmacro %}

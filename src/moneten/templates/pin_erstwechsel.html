@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Eigene PIN setzen — Moneten-Tracker{% endblock %}
+
+{% block body %}
+{% include "partials/icon_sprite.html" %}
+{# Bewusst OHNE HTMX und ohne das Ziffernfeld der Anmeldeseite: hier braucht es
+   zwei Eingaben, und ein gewoehnliches Formular kann nicht halb absenden. Auch
+   bewusst ohne Abbrechen: es gaebe nichts, wohin man abbrechen koennte — bis
+   hier eine eigene PIN steht, bleibt der Rest der App zu. #}
+<div class="login-shell">
+  <div class="login-card">
+
+    <div class="login-brand">
+      <img class="brand-logo" src="/static/img/logo.png" alt="Moneten-Tracker Logo">
+      <h1>Eigene PIN setzen</h1>
+      <p>Es gilt noch die Start-PIN aus der Konfigurationsdatei.</p>
+    </div>
+
+    <form method="post" action="/pin-aendern" autocomplete="off" class="form-grid mt-4">
+      <label>
+        Neue PIN
+        <input type="password" name="neue_pin" inputmode="numeric" pattern="[0-9]{6}"
+               maxlength="6" required autofocus autocomplete="new-password">
+      </label>
+      <label>
+        Wiederholen
+        <input type="password" name="bestaetigung" inputmode="numeric" pattern="[0-9]{6}"
+               maxlength="6" required autocomplete="new-password">
+      </label>
+
+      {% if fehler %}
+      <div class="login-error" role="alert">{{ fehler }}</div>
+      {% endif %}
+
+      <button type="submit" class="btn btn-primary full-w">PIN setzen</button>
+    </form>
+
+    <p class="muted mt-4">
+      Sechs Ziffern, nicht die bisherige und keine Reihe wie 123456 oder 111111 —
+      das sind die ersten Versuche, die jemand macht.
+      <a href="/logout">Abmelden</a>
+    </p>
+
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,133 @@
+{# Erfassung der Lohnzusammensetzung — im Bearbeiten-Formular einer Einnahme,
+   neben Quittung und Aufteilung (dasselbe Muster: eigene Karte, eigener
+   hx-post, Antwort ersetzt #transactions-root).
+
+   Zwei beschriftete Gruppen statt einer Liste mit Richtungs-Auswahl je Zeile:
+   die Richtung ist eine Eigenschaft der Gruppe und nicht der Position. Das
+   spart auf 375px die 104px breite Auswahl in jeder Zeile — und die Erfassung
+   hat damit dieselbe Gestalt wie die Anzeige an der Buchung.
+
+   Die Reihenfolge im Markup ist die Reihenfolge im Formular: die Felder
+   lohn_art / lohn_label / lohn_key / lohn_betrag / lohn_alt / lohn_herkunft
+   reisen als sechs gleich lange Listen, eine Position je Zeile.
+
+   ``lohn_alt`` und ``lohn_herkunft`` tragen den Stand VOR der Bearbeitung mit.
+   Daraus entscheidet der Server, ob ein Posten als erfasst oder als gerechnet
+   gespeichert wird: wer eine Zahl ändert, verantwortet sie. Ohne diese beiden
+   Felder liesse sich das nicht unterscheiden — ein übernommener Schätzwert
+   sähe nach dem Speichern aus wie eine abgelesene Zahl. #}
+<div class="card sunken" style="margin-bottom:18px" id="lohn-editor">
+  <div class="flex items-center justify-between" style="margin-bottom:8px">
+    <div class="label-cap">Lohnzusammensetzung</div>
+    <button type="button" class="btn btn-ghost text-sm"
+            hx-post="/transactions/{{ edit_tx.id }}/lohn/suggest"
+            hx-target="#transactions-root" hx-swap="innerHTML">{{ icon('bolt') }} Vorschlag</button>
+  </div>
+
+  <form id="lohn-form" hx-post="/transactions/{{ edit_tx.id }}/lohn"
+        hx-target="#transactions-root" hx-swap="innerHTML">
+    {# ``art`` ist zugleich der Wert des versteckten Feldes und der Schlüssel der
+       Kasten-/Vorlagen-IDs — eine Quelle, damit Gruppe und gespeicherte Richtung
+       nicht auseinanderlaufen können. #}
+    {% for art, titel, beispiel in [
+         ('brutto', 'Bruttolohn und Zulagen', 'z.B. Ferienzuschlag'),
+         ('abzug',  'Abzüge',                 'z.B. Quellensteuer')] %}
+      <div class="lohn-gruppe">
+        <div class="lohn-gruppe-kopf">{{ titel }}</div>
+        <div id="lohn-rows-{{ art }}">
+          {% for row in lohn_rows if row.art == art %}
+            <div class="lohn-row">
+              <input type="hidden" name="lohn_art" value="{{ art }}">
+              <input name="lohn_label" class="lohn-label" value="{{ row.label }}"
+                     aria-label="Bezeichnung" placeholder="{{ beispiel }}">
+              {# Schlüssel der Zeile — nur dazu da, dass die Gegenprobe ihre
+                 Antwort der richtigen Zeile zuordnen kann (Marke unten). Er
+                 reist mit, damit eine gelöschte Zeile keine fremde Marke erbt.
+                 Die Marke bleibt hier LEER: welches Zeichen sie trägt („=" für
+                 fortgeschrieben, „≈" für gerechnet), entscheidet der Server
+                 beim ersten `load` der Gegenprobe — im Formular stünde sonst
+                 eine zweite Regel dafür. #}
+              <input type="hidden" name="lohn_key" value="{{ art }}{{ loop.index0 }}">
+              <span id="lohn-marke-{{ art }}{{ loop.index0 }}" class="lohn-marke"></span>
+              <input name="lohn_betrag" class="lohn-betrag-eingabe" inputmode="decimal"
+                     value="{{ row.betrag }}" aria-label="Betrag" placeholder="0.00">
+              {# `row.alt` gibt es NUR beim erneuten Rendern nach einem
+                 Validierungsfehler — dann traegt es den Stand vor der
+                 Bearbeitung. Ohne es stand hier der frisch getippte Wert, und
+                 die Herkunfts-Pruefung verglich die Zahl mit sich selbst: eine
+                 selbst getippte Zahl galt danach als „gerechnet". #}
+              <input type="hidden" name="lohn_alt" value="{{ row.alt | default(row.betrag, true) }}">
+              <input type="hidden" name="lohn_herkunft" value="{{ row.herkunft }}">
+              <button type="button" class="icon-action danger lohn-del"
+                      title="Position entfernen" aria-label="Position entfernen">{{ icon('trash') }}</button>
+            </div>
+          {% endfor %}
+        </div>
+        <button type="button" class="btn btn-ghost text-sm lohn-add"
+                data-lohn-ziel="lohn-rows-{{ art }}"
+                data-lohn-tpl="lohn-tpl-{{ art }}">+ Position</button>
+      </div>
+    {% endfor %}
+
+    {# Mitlaufende Gegenprobe: gerechneter Nettolohn gegen den gebuchten Betrag.
+       Sie darf abweichen — deshalb stehen hier Zahlen und keine Sperre.
+
+       Gerechnet wird sie auf dem Server, nicht im Browser: sonst stünden die
+       Regeln dieses Moduls ein zweites Mal in einer zweiten Sprache da, und die
+       Vorschau rechnete auch mit Eingaben weiter, die das Speichern ablehnt.
+       `load` füllt sie beim Öffnen, `input` beim Tippen, `lohnprobe` schickt
+       app.js nach einer gelöschten oder neuen Zeile (die lösen kein `input`). #}
+    <div class="lohn-probe-halter">
+      {# `hx-target="this"` ist Pflicht und nicht Zierde: hx-target vererbt sich,
+         und das umgebende Formular zielt auf #transactions-root. Ohne die
+         Angabe ersetzte die Antwort der Gegenprobe die ganze Seite. #}
+      <div class="lohn-probe" id="lohn-probe" aria-live="polite"
+           hx-post="/transactions/{{ edit_tx.id }}/lohn/probe"
+           hx-include="#lohn-form" hx-target="this" hx-swap="innerHTML"
+           hx-trigger="load, lohnprobe, input from:#lohn-form delay:300ms"></div>
+    </div>
+
+    {# Dieselbe Breitengrenze wie die Eingabegruppen darüber: das Feld trägt
+       einen Halbsatz („übernommen aus Juni 2026") und nicht die Kartenbreite. #}
+    <div class="lohn-grundlage-feld">
+      {# „markiert" und nicht „gerechnet": seit es drei Stufen gibt, tragen auch
+         die fortgeschriebenen Werte eine Marke, und die Grundlage nennt genau
+         deren Herkunftsmonat. #}
+      <label for="lohn-grundlage">Grundlage der markierten Werte</label>
+      <input id="lohn-grundlage" name="lohn_grundlage" class="full-w"
+             value="{{ lohn_grundlage or '' }}" maxlength="160"
+             placeholder="z.B. Lohnausweis 2025 ÷ 12">
+    </div>
+
+    <div class="flex gap-2 mt-4 lohn-aktionen">
+      <button type="submit" class="btn btn-primary">Zusammensetzung speichern</button>
+      {% if lohn_erfasst %}
+        <button type="button" class="btn btn-ghost" style="color:var(--danger)"
+                hx-post="/transactions/{{ edit_tx.id }}/lohn/clear"
+                hx-target="#transactions-root" hx-swap="innerHTML"
+                hx-confirm="Lohnzusammensetzung entfernen? Die Buchung selbst bleibt.">Entfernen</button>
+      {% endif %}
+    </div>
+  </form>
+
+  {# Vorlagen für „+ Position" (JS klont sie). Ohne alten Betrag und ohne alte
+     Herkunft: eine neu getippte Zeile ist immer eine erfasste — sie braucht
+     deshalb auch keinen Schlüssel, ihre Marke bliebe ohnehin leer. #}
+  {% for art, beispiel in [('brutto', 'z.B. Ferienzuschlag'),
+                           ('abzug', 'z.B. Quellensteuer')] %}
+    <template id="lohn-tpl-{{ art }}">
+      <div class="lohn-row">
+        <input type="hidden" name="lohn_art" value="{{ art }}">
+        <input name="lohn_label" class="lohn-label" aria-label="Bezeichnung" placeholder="{{ beispiel }}">
+        <input type="hidden" name="lohn_key" value="">
+        <span class="lohn-marke"></span>
+        <input name="lohn_betrag" class="lohn-betrag-eingabe" inputmode="decimal"
+               aria-label="Betrag" placeholder="0.00">
+        <input type="hidden" name="lohn_alt" value="">
+        <input type="hidden" name="lohn_herkunft" value="">
+        <button type="button" class="icon-action danger lohn-del"
+                title="Position entfernen" aria-label="Position entfernen">{{ icon('trash') }}</button>
+      </div>
+    </template>
+  {% endfor %}
+</div>

@@ -1,0 +1,29 @@
+{# Fortschritts-Widget für den Quittungs-Abgleich. Solange nicht fertig, pollt
+   sich das Element per HTMX selbst weiter (jeder Poll verarbeitet einen Beleg);
+   bei „done" entfällt der Trigger → Polling stoppt. #}
+<div id="match-progress" class="card sunken" style="margin:12px 0"
+     {% if not job.done %}hx-get="/import/receipts/auto/step?job={{ jid }}" hx-trigger="load delay:300ms" hx-swap="outerHTML"{% endif %}>
+  {% if job.done %}
+    {% if job.total == 0 %}
+      <div class="muted text-sm">Keine offenen Quittungen zum Abgleichen.</div>
+    {% else %}
+      <div class="flex items-center justify-between gap-3" style="flex-wrap:wrap">
+        <span class="banner-ok">✓ Abgleich fertig — {{ job.matched }} von {{ job.total }} automatisch zugeordnet.</span>
+        <a class="btn btn-ghost text-sm" href="/import/receipts">Liste aktualisieren</a>
+      </div>
+    {% endif %}
+  {% else %}
+    <div class="match-progress-row">
+      <svg class="match-ring" viewBox="0 0 60 60" role="img" aria-label="{{ percent }} Prozent">
+        <circle class="ring-track" cx="30" cy="30" r="26"></circle>
+        <circle class="ring-prog" cx="30" cy="30" r="26" pathLength="100"
+                stroke-dasharray="{{ percent }} 100" transform="rotate(-90 30 30)"></circle>
+        <text class="ring-text" x="30" y="34" text-anchor="middle">{{ percent }}%</text>
+      </svg>
+      <div style="min-width:0">
+        <div>Quittungen werden abgeglichen … <strong>Beleg {{ job.idx }}/{{ job.total }}</strong></div>
+        <div class="muted text-sm">{{ job.matched }} automatisch zugeordnet · gerade: {{ job.current or "…" }}</div>
+      </div>
+    </div>
+  {% endif %}
+</div>

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+{# Theme + passende Hintergrundfarbe INLINE setzen → der allererste Paint hat
+   schon die richtige Farbe, auch bevor das CSS (über die NAS-Verbindung evtl.
+   verzögert) geladen ist. Verhindert das kurze Hell-/Weiss-Aufblitzen auf Mobile.
+
+   Das Theme ist EINACHSIG: ein Name ("dark" | "light" | "nord" | …).
+   Registry: moneten/themes.py · Farben: static/css/skins.css. Ein neues Theme
+   braucht hier KEINE Änderung — Hintergrund und Helligkeit kommen aus der Registry. #}
+{% set _t = theme_of(user if user is defined else None) %}
+<html lang="de" data-theme="{{ _t.key }}"
+      style="background-color: {{ _t.bg }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="{{ 'dark' if _t.dark else 'light' }}">
+  <title>{% block title %}Moneten-Tracker{% endblock %}</title>
+  <link rel="icon" type="image/png" href="/static/img/logo.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/img/icon-32.png">
+
+  <!-- PWA: Manifest + Icons → „Zum Startbildschirm hinzufügen" zeigt das Logo
+       (statt eines generischen Buchstabens) und nennt die App „Moneten". -->
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/img/icon-180.png">
+  {# Statusleisten-Farbe der PWA dem aktiven Skin nachführen (gleicher Ausdruck
+     wie das Inline-style oben); app.js schreibt sie beim Theme-Wechsel nach. #}
+  <meta name="theme-color" content="{{ _t.bg }}">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Moneten">
+
+  {# Offline-First: Fonts, HTMX und Styles werden ausschliesslich lokal aus
+     /static/ geladen. KEINE externen CDN-Calls zur Laufzeit. Bewusst ein
+     Jinja-Kommentar: als HTML-Kommentar stand er im Seitenquelltext JEDER
+     Seite — und belegte die Offline-Zusage mit einem Verweis auf eine Datei,
+     die es im veröffentlichten Repository nicht gibt. #}
+  {# Cache-Busting: ?v=Version erzwingt nach jedem Deploy frische CSS/JS — sonst
+     hält der Browser (Brave/PWA) die alte Datei und neue Styles kommen nie an. #}
+  {# Fonts vorladen: sonst entdeckt der Browser die woff2 erst NACH dem fonts.css-
+     Roundtrip → sichtbarer Font-Swap auf Mobile. #}
+  <link rel="preload" href="/static/fonts/poppins-400-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/poppins-500-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/css/fonts.css?v={{ statik_v }}">
+  {# skins.css MUSS vor theme.css stehen: es definiert nur Farb-Token, theme.css
+     verbraucht sie. Alle Farbwelten sind gleichzeitig geladen (zusammen ~4 KB) —
+     dadurch wechselt das Theme client-seitig sofort, ohne CSS nachzuladen. #}
+  <link rel="stylesheet" href="/static/css/skins.css?v={{ statik_v }}">
+  <link rel="stylesheet" href="/static/css/theme.css?v={{ statik_v }}">
+  {# Die vier Verweise auf static/css/parts/ sind raus: das Verzeichnis gibt es
+     nicht mehr (die Teilstücke sind in theme.css zusammengeführt). Übrig blieben
+     die <link>-Tags — vier 404-Antworten bei JEDEM Seitenaufruf, im Browser als
+     „Refused to apply style … MIME type application/json" sichtbar.
+     test_kein_stylesheet_ausserhalb_der_geladenen prüft nur die Gegenrichtung
+     (herumliegende, ungeladene Dateien) und schlug deshalb nicht an. #}
+  {# htmx auch mit Cache-Busting: bei einem htmx-Update hielte der 30-Tage-Cache sonst
+     die alte Version fest (gleiches Muster wie app.js). #}
+  <script src="/static/js/htmx.min.js?v={{ statik_v }}" defer></script>
+  <script src="/static/js/app.js?v={{ statik_v }}" defer></script>
+</head>
+<body>
+{% block body %}{% endblock %}
+</body>
+</html>

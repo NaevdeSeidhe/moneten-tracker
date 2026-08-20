@@ -1,0 +1,213 @@
+{% extends "_shell.html" %}
+{% block title %}Import — Moneten-Tracker{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div>
+    <h1 class="hero-greeting">Import</h1>
+  </div>
+  <div class="hero-aside"><a class="btn" href="/import/receipts">{{ icon('receipt') }} Quittungen zuordnen →</a></div>
+</div>
+
+{% if error %}
+  <div class="feedback err" style="margin-bottom:18px">{{ error }}</div>
+{% endif %}
+
+{# ----------  Import-Report (nach Upload)  ---------- #}
+{% if report %}
+  <div class="card" style="margin-bottom:18px">
+    <div class="label-cap card-head">Import abgeschlossen</div>
+    <div class="card-sub" style="margin-bottom:14px">
+      {{ report.files_count }} Datei(en) · {{ report.statements }} Auszug/Auszüge ·
+      <strong style="color:var(--accent-tertiary)">{{ report.total_imported }}</strong> importiert ·
+      {{ report.total_skipped }} übersprungen (Duplikate)
+    </div>
+
+    {% if report.file_errors %}
+      <div class="feedback err" style="margin-bottom:14px">
+        {% for e in report.file_errors %}<div>⚠ {{ e }}</div>{% endfor %}
+      </div>
+    {% endif %}
+
+    {% if report.startsaldo %}
+      {# Der Startsaldo verschiebt den GANZEN Kontostand (Stand = Startsaldo +
+         Summe aller Buchungen). Wird er übernommen, muss hier stehen, was sich
+         geändert hat — sonst sucht man den Sprung später bei den Buchungen. #}
+      {% set startsaldo_warnung = report.startsaldo | selectattr('vorher_n') | list %}
+      <div class="feedback {{ 'err' if startsaldo_warnung else 'ok' }}" style="margin-bottom:14px">
+        {% for s in report.startsaldo %}
+          {% if s.uebersprungen %}
+            <div>{{ s.konto }}: Startsaldo unverändert — je Import wird er nur aus dem
+              ersten Auszug dieses Kontos übernommen.</div>
+          {% else %}
+            <div>
+              Startsaldo {{ s.konto }}: <span class="mono">{{ '%.2f'|format(s.alt or 0) }}</span>
+              → <strong class="mono">{{ '%.2f'|format(s.neu) }}</strong>
+              {%- if s.vorher_n %}<br>⚠ {{ s.vorher_n }} Buchung{{ 'en' if s.vorher_n != 1 }}
+                liegen VOR dem Auszugsbeginn. Der Anfangssaldo des Auszugs enthält sie schon,
+                die App zählt sie noch einmal dazu — Kontostand jetzt zu hoch oder zu tief.
+                Startsaldo im <a href="/accounts">Konto</a> von Hand richtigstellen.{% endif %}
+            </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if report.match_after_import %}
+      {# Startet den Quittungs-Abgleich im Hintergrund (Polling) und zeigt den
+         runden Fortschritt — blockiert den Import nicht mehr. #}
+      <div id="match-progress" hx-post="/import/receipts/auto/begin"
+           hx-trigger="load" hx-swap="outerHTML"></div>
+    {% endif %}
+
+    {% if report.unmatched %}
+      <div class="feedback err" style="margin-bottom:14px">
+        ⚠ Kein Konto gefunden für IBAN: {{ report.unmatched | join(", ") }}.<br>
+        Trage die IBAN beim passenden <a href="/accounts">Konto</a> ein (Konto bearbeiten → IBAN)
+        und importiere erneut — Duplikate werden dabei übersprungen.
+      </div>
+    {% endif %}
+
+    {% for r in report.results %}
+      <div class="card sunken" style="margin-bottom:12px">
+        {% if r.filename %}<div class="muted text-sm mono" style="margin-bottom:4px">{{ r.filename }}</div>{% endif %}
+        {% if r.weg_zeilen %}
+          {# Eine CSV-Zeile, die der Leser nicht versteht, verschwand vorher lautlos.
+             Bei einem unbekannten Betragsformat sind das nicht drei Fusszeilen,
+             sondern alle Buchungen — und der Bericht meldete trotzdem „importiert". #}
+          <div class="feedback err" style="margin-bottom:10px">
+            ⚠ {{ r.weg_zeilen }} Zeile{{ 'n' if r.weg_zeilen != 1 }} übersprungen (Datum oder
+            Betrag nicht lesbar). Sind das mehr als die Summen- und Fusszeilen der Datei,
+            passt das Format nicht — dann fehlen echte Buchungen.
+            {% if r.weg_beispiele %}
+              <div class="muted text-sm mono" style="margin-top:6px">
+                {% for b in r.weg_beispiele %}<div>{{ b }}</div>{% endfor %}
+              </div>
+            {% endif %}
+          </div>
+        {% endif %}
+        <div class="label-cap" style="margin-bottom:10px">
+          {{ r.account.name }}
+          <span class="muted text-sm" style="text-transform:none; letter-spacing:0">
+            · {{ r.iban or "ohne IBAN" }}
+            {% if r.matched_by == 'iban' %}<span class="pill" style="color:var(--accent-tertiary)">per IBAN erkannt</span>
+            {% elif r.matched_by == 'fallback' %}<span class="pill" style="color:var(--text-tertiary)">Fallback-Konto</span>{% endif %}
+          </span>
+        </div>
+        {% if r.balance_match is none %}
+          {# „in der Datei" stand über dem Dateinamen dieser Karte. #}
+          <div class="banner-ok" style="border-left-color:var(--text-tertiary)">Kein Schluss-Saldo — kein Abgleich.</div>
+        {% elif r.balance_match %}
+          <div class="banner-ok">✓ Saldo stimmt überein · {{ r.actual_closing | chf }} = Bank {{ r.expected_closing | chf }}</div>
+        {% else %}
+          <div class="feedback err">⚠ Saldo-Differenz: App {{ r.actual_closing | chf }} ↔ Bank {{ r.expected_closing | chf }} ({{ r.balance_diff | chf }}). <a href="/accounts">Startsaldo prüfen</a>?</div>
+        {% endif %}
+        {# Zweite, unabhaengige Pruefung: geht die Datei in sich auf? Der Saldo-
+           Vergleich oben kann auch an fehlenden Altdaten liegen — diese hier
+           faellt nur aus, wenn beim Lesen Buchungen verloren gingen. Sie wird
+           nur gemeldet, wenn sie ANSCHLAEGT; ein stiller Haken waere Rauschen. #}
+        {% if r.auszug and r.auszug.pruefbar and not r.auszug.stimmt %}
+          <div class="feedback err">⚠ Die Datei geht nicht auf: {{ r.auszug.hinweis }}</div>
+        {% endif %}
+        <div class="flex gap-3 mt-4 text-sm">
+          <span class="mono" style="color:var(--accent-tertiary)">+{{ r.imported }} neu</span>
+          <span class="mono muted">{{ r.skipped }} Duplikate</span>
+          <span class="mono muted">{{ r.total_in_file }} in Datei</span>
+          {% if r.period_from and r.period_to %}<span class="muted">· {{ r.period_from.strftime('%d.%m.%y') }}–{{ r.period_to.strftime('%d.%m.%y') }}</span>{% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<div class="grid-main">
+
+  {# ----------  Upload-Formular  ---------- #}
+  <div class="card">
+    <div class="label-cap card-head">Datei hochladen</div>
+    <form id="import-form" action="/import" method="post" enctype="multipart/form-data">
+      <div class="form-grid" style="max-width:none">
+        <div>
+          <label for="imp-account">Fallback-Konto (optional)</label>
+          <select id="imp-account" name="account_id" class="full-w">
+            <option value="">— automatisch per IBAN zuordnen —</option>
+            {% for acc in accounts %}
+              <option value="{{ acc.id }}">{{ acc.name }}{% if acc.iban %} · {{ acc.iban }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="imp-file">Dateien (CAMT.053 / CSV)</label>
+          {# S3: gestylter, deutscher Datei-Wähler statt rohem nativem Input
+             („Browse… / No files selected."). JS füllt den Dateinamen (app.js). #}
+          <label class="file-field" data-file-field>
+            <input id="imp-file" name="files" type="file" multiple
+                   accept=".xml,text/xml,application/xml,.csv,text/csv" required>
+            <span class="file-field-btn">{{ icon('upload') }} Dateien wählen</span>
+            <span class="file-field-name" data-empty="Keine Datei ausgewählt">Keine Datei ausgewählt</span>
+          </label>
+        </div>
+        {# Die Beschriftung ist die ENTSCHEIDUNG, nicht ihre Begründung: vorher
+           standen 13 Wörter neben dem Kästchen und brachen auf 375 px in zwei
+           Zeilen — das las sich wie ein Absatz mit Häkchen davor. Wann man das
+           braucht, versteht man einmal; deshalb steht es im Aufklapper und nicht
+           dauerhaft auf dem Schirm. #}
+        <div>
+          <label class="flex items-center gap-2" style="text-transform:none; letter-spacing:0; color:var(--text-secondary)">
+            <input type="checkbox" name="adopt_opening" value="1">
+            Startsaldo aus dem Auszug übernehmen
+          </label>
+          <details class="disclosure">
+            <summary class="muted text-sm">Wann brauche ich das?</summary>
+            <div class="muted text-sm">
+              Für den ersten Import: setzt den Startsaldo des Kontos auf den
+              Anfangssaldo des Auszugs.
+            </div>
+          </details>
+        </div>
+        <button type="submit" class="btn btn-primary">Importieren</button>
+        {# Fortschrittsanzeige waehrend des Imports (wird per JS eingeblendet). #}
+        <div id="import-progress" class="import-progress" hidden>
+          <div class="import-bar"><span></span></div>
+          {# Der Balken zeigt bereits, dass verarbeitet wird. #}
+          <div class="import-progress-text muted text-sm">Import läuft…</div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  {# ----------  Import-Historie  ---------- #}
+  <div class="card">
+    <div class="label-cap card-head">Letzte Importe</div>
+    {% if batches %}
+      {# Der Dateiname identifiziert den Import, alles andere ordnet ihn ein. Auf
+         375 px stand vorher jede Zeile über drei Reihen (142 px): der Name war
+         abgeschnitten, die Saldo-Pille brach in zwei Zeilen um und „Rückgängig"
+         rutschte darunter. Jetzt Name oben, Einordnung als eine Wertzeile
+         darunter, die Aktion als Icon daneben — das Wort steht in title,
+         aria-label und in der Sicherheitsabfrage. #}
+      {% for b in batches %}
+        <div class="row imp-row">
+          <span class="imp-haupt">
+            <span class="imp-fname" title="{{ b.filename or '' }}">{{ b.filename or "—" }}</span>
+            <span class="imp-meta muted text-sm">
+              <span class="mono">{{ b.imported_at.strftime('%d.%m.%y') }}</span> ·
+              <span class="mono">{{ b.total_transactions }}</span> Buch.
+              {%- if b.balance_match is true %} · <span style="color:var(--accent-tertiary)">Saldo ok</span>
+              {%- elif b.balance_match is false %} · <span style="color:var(--danger)">Saldo-Diff</span>{% endif %}
+            </span>
+          </span>
+          <form action="/import/{{ b.id }}/delete" method="post"
+                data-confirm="Import „{{ b.filename or '—' }}“ rückgängig machen? {{ b.total_transactions }} Buchung{{ 'en' if b.total_transactions != 1 }}{% if b.aufteilungen_n %}, {{ b.aufteilungen_n }} Aufteilung{{ 'en' if b.aufteilungen_n != 1 }}{% endif %}{% if b.anhaenge_n %} und {{ b.anhaenge_n }} Beleg-Zuordnung{{ 'en' if b.anhaenge_n != 1 }}{% endif %} werden gelöscht.{% if b.anhaenge_n %} Die Beleg-Dateien bleiben liegen, der gelesene Inhalt ist weg.{% endif %}">
+            <button type="submit" class="icon-action danger" title="Import rückgängig machen"
+                    aria-label="Import {{ b.filename or '' }} rückgängig machen">{{ icon('rotate') }}</button>
+          </form>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="muted text-sm" style="padding:12px 0">Noch keine Importe.</div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

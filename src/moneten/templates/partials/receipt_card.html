@@ -1,0 +1,74 @@
+{# Eine Beleg-Karte im Zuordnen-Assistenten. Erwartet: s (ReceiptSuggestion),
+   options (Liste Buchungen), idx (eindeutige Nummer für ids/HTMX-Targets).
+   Wird von receipts_match.html (Liste) UND vom Undo (Re-Render) genutzt. #}
+<div class="card" id="receipt-card-{{ idx }}" style="margin-bottom:16px">
+  <div class="flex items-center justify-between" style="margin-bottom:12px">
+    <div class="flex items-center gap-2" style="min-width:0">
+      <span class="receipt-info" tabindex="0" role="button" aria-label="Erkannte Beleg-Infos anzeigen">
+        {{ icon('receipt', 'cat-icon lg') }}
+        <span class="receipt-tip card">
+          <div class="text-sm" style="margin-bottom:6px">
+            <strong>Erkannt:</strong>
+            {% if s.date_guess %}{{ s.date_guess.strftime('%d.%m.%Y') }}{% else %}kein Datum{% endif %} ·
+            {% if s.amount %}{{ s.amount | chf }}{% else %}kein Betrag{% endif %} ·
+            Quelle {{ s.ocr_method }}
+          </div>
+          <pre class="receipt-preview">{{ s.ocr_text or 'kein Text erkannt' }}</pre>
+        </span>
+      </span>
+      <span style="min-width:0">
+        <strong>{{ s.receipt.name }}</strong>
+        <div class="text-sm muted">
+          {% if s.date_guess %}Datum {{ s.date_guess.strftime('%d.%m.%Y') }}{% else %}kein Datum erkannt{% endif %}
+          {% if s.amount %} · Betrag ≈ {{ s.amount | chf }}{% else %} · kein Betrag erkannt{% endif %}
+          · <a href="/import/receipts/file?name={{ s.receipt.name | urlencode }}" target="_blank" rel="noopener">Beleg öffnen ↗</a>
+          {% if s.reason %}<br><span style="color:var(--text-tertiary)">↳ {{ s.reason }}</span>{% endif %}
+        </div>
+      </span>
+    </div>
+    {% if s.best %}
+      <span class="pill" style="color:var(--accent-tertiary)">Vorschlag gefunden</span>
+    {% else %}
+      <span class="pill" style="color:var(--text-tertiary)">kein Auto-Treffer</span>
+    {% endif %}
+  </div>
+
+  {% if not s.amount %}
+  <form hx-post="/import/receipts/diagnose" hx-target="#diag-{{ idx }}" hx-swap="innerHTML" class="mb-4">
+    <input type="hidden" name="filename" value="{{ s.receipt.name }}">
+    <button type="submit" class="btn btn-ghost btn-sm">{{ icon('search') }} Diagnose</button>
+  </form>
+  <div id="diag-{{ idx }}"></div>
+  {% endif %}
+
+  {# Suchfeld (Server-Suche über ALLE noch offenen Buchungen, beliebiges Datum) bewusst
+     AUSSERHALB des Zuordnen-Formulars — so löst Enter im Suchfeld nicht versehentlich
+     eine Zuordnung aus. Tippen ersetzt die <option>s im Dropdown unten. #}
+  <input type="search" name="q" class="tx-search full-w" style="margin-bottom:8px"
+         placeholder="Betrag, Text oder Datum suchen…"
+         aria-label="Buchung über alle Daten suchen"
+         hx-get="/import/receipts/tx-options"
+         hx-trigger="keyup changed delay:350ms, search"
+         hx-target="#tx-select-{{ idx }}" hx-swap="innerHTML" hx-params="q">
+  <form hx-post="/import/receipts/assign" hx-target="#receipt-card-{{ idx }}" hx-swap="outerHTML"
+        class="flex gap-2 items-center" style="flex-wrap:wrap">
+    <input type="hidden" name="filename" value="{{ s.receipt.name }}">
+    <select name="transaction_id" id="tx-select-{{ idx }}" class="cand-select" style="flex:1 1 240px">
+      {% for tx in options %}
+        <option value="{{ tx.id }}" {% if s.best and tx.id == s.best.id %}selected{% endif %}>
+          {{ tx.date.strftime('%d.%m.%Y') }} · {{ tx.description or '(ohne Beschreibung)' }} · {{ tx.amount | chf }}
+        </option>
+      {% endfor %}
+      {% if not options %}
+        <option value="">— keine Treffer —</option>
+      {% endif %}
+    </select>
+    <button type="submit" class="btn btn-primary">Zuordnen</button>
+  </form>
+  <div class="flex items-center mt-4" style="justify-content:flex-end">
+    <form hx-post="/import/receipts/archive" hx-target="#receipt-card-{{ idx }}" hx-swap="outerHTML">
+      <input type="hidden" name="filename" value="{{ s.receipt.name }}">
+      <button type="submit" class="btn btn-ghost btn-sm">{{ icon('archive') }} Archivieren (kein Bankeintrag)</button>
+    </form>
+  </div>
+</div>

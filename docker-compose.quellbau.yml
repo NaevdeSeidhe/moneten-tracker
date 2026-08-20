@@ -1,0 +1,24 @@
+# =========================================================================
+# Selbst bauen statt herunterladen — eine Ergaenzung, keine zweite Fassung.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.quellbau.yml up -d --build
+#
+# **Warum als Ergaenzung.** Zwei vollstaendige Compose-Dateien laufen
+# auseinander: irgendwann steht die Speichergrenze nur noch in einer, und
+# welche davon gilt, merkt man am Tag des Fehlers. Hier steht deshalb NUR der
+# Unterschied — Ports, Volumes, Speicher und Umgebung kommen aus
+# `docker-compose.yml`.
+#
+# **Wann du das brauchst:**
+#
+# * Du aenderst den Quelltext.
+# * Deine Rechnerarchitektur ist nicht x86_64 (siehe README, „Andere
+#   Rechnerarchitektur") — dann gibt es kein fertiges Abbild fuer dich.
+# * Du willst dem fertigen Abbild grundsaetzlich nicht vertrauen. Ein
+#   nachvollziehbarer Standpunkt: `requirements-docker.txt` nagelt jedes Paket
+#   samt Pruefsumme fest, dein Bau ist also derselbe wie der auf GitHub.
+# =========================================================================
+services:
+  moneten:
+    build: .
+    image: moneten:selbstgebaut

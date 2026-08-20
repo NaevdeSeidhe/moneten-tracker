@@ -1,0 +1,219 @@
+{% extends "_shell.html" %}
+{% block title %}Steuerjahr {{ jahr }} — Moneten-Tracker{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div>
+    <h1 class="hero-greeting">Steuerjahr {{ jahr }}</h1>
+  </div>
+</div>
+
+{# ==========================================================================
+   MEHRJAHRES-ÜBERSICHT (services.tax_year.steuer_uebersicht → `uebersicht`)
+
+   Zwei Reihen auf EINER Jahresachse: gestapelte Balken (Abzüge, aufgeteilt
+   nach Steuerposition) und darunter die Vermögenskurve per 31.12. Genau die
+   zwei Zahlen, die die Steuererklärung verlangt — nebeneinander gestellt
+   beantworten sie die Frage, die ein Einzeljahr nicht beantworten kann.
+
+   Die Balken tragen die Zusammensetzung mit: dass die Prämien den Stapel
+   auffressen und die 3a-Einzahlung schrumpft, sieht man an den Segmenten,
+   ohne ein zweites Diagramm dafür zu bauen.
+
+   `uebersicht` ist None, solange es weniger als zwei Jahre mit Buchungen gibt.
+
+   BESCHRIFTUNG STEHT AUSSERHALB DES SVG — nur die Kurve ist SVG. Text im SVG
+   zählt in viewBox-Einheiten, skaliert mit der Kartenbreite mit (am Handy
+   unlesbar klein) und wird am viewBox-Rand abgeschnitten. Dieselbe Lehre wie
+   auf der Verlaufsseite und beim Sankey.
+
+   FARBEN NUR ÜBER TOKEN: `--sj-linie` wird EINMAL an der Karte gesetzt und
+   zeigt auf einen Palettenslot. Ein eingebackener Hex-Wert bliebe beim
+   Theme-Wechsel stehen, weil der im Browser läuft. ========================= #}
+{% if uebersicht %}
+<section class="card mb-4 sj-karte" style="--sj-linie: var(--chart-{{ uebersicht.linien_slot }})">
+  <div class="label-cap card-head">
+    {%- if uebersicht.zeigt_abzuege and uebersicht.zeigt_vermoegen -%}Abzüge und Vermögen
+    {%- elif uebersicht.zeigt_abzuege -%}Abzüge
+    {%- else -%}Vermögen{%- endif %} {{ uebersicht.von }}–{{ uebersicht.bis }}
+  </div>
+
+  <div class="sj-chart{{ ' ohne-balken' if not uebersicht.zeigt_abzuege }}{{ ' ohne-kurve' if not uebersicht.zeigt_vermoegen }}"
+       style="--sj-n:{{ uebersicht.jahre | length }}">
+
+    {% if uebersicht.zeigt_abzuege %}
+      <div class="sj-yachse sj-yachse-b">
+        <span>{{ uebersicht.max_abzug | chf_kurz }}</span>
+        <span>0</span>
+      </div>
+    {% endif %}
+    {% if uebersicht.zeigt_vermoegen %}
+      {# chf_kurz schreibt die Null als Gedankenstrich — an einer Achse wäre das
+         keine Beschriftung, sondern ein Rätsel. #}
+      <div class="sj-yachse sj-yachse-v{{ ' sj-flach' if uebersicht.v_flach }}">
+        <span>{{ uebersicht.v_max | chf_kurz if uebersicht.v_max else '0' }}</span>
+        {% if not uebersicht.v_flach %}
+          <span>{{ uebersicht.v_min | chf_kurz if uebersicht.v_min else '0' }}</span>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <div class="sj-plot">
+      {% if uebersicht.zeigt_vermoegen %}
+        {# Rein dekorativ: jede Zahl der Kurve steht im aria-label der Spalte
+           darüber, die Kurve selbst wäre für einen Screenreader nur Rauschen. #}
+        <div class="sj-vplot" aria-hidden="true">
+          <div class="sj-vinner">
+            <svg class="sj-kurve" viewBox="0 0 100 100" preserveAspectRatio="none" focusable="false">
+              <path d="{{ uebersicht.v_pfad }}" fill="none"/>
+            </svg>
+            {% for j in uebersicht.jahre %}
+              <span class="sj-pkt{{ ' laeuft' if j.laufend }}" style="left:{{ j.vx }}%;top:{{ j.vy }}%"></span>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+      {% for j in uebersicht.jahre %}
+        {% set marke = j.jahr ~ (' läuft noch, Zahlen unvollständig' if j.laufend else '') %}
+        <a class="sj-spalte{{ ' is-aktiv' if j.jahr == jahr }}{{ ' laeuft' if j.laufend }}"
+           style="grid-column:{{ loop.index }}"
+           href="/steuern?jahr={{ j.jahr }}"
+           title="{{ marke }} · Abzüge {{ j.abzuege | chf }} · Vermögen {{ j.vermoegen | chf }}"
+           aria-label="Steuerjahr {{ marke }}: Abzüge {{ j.abzuege | chf }}, Vermögen per 31.12. {{ j.vermoegen | chf }}"
+           {% if j.jahr == jahr %}aria-current="page"{% endif %}>
+          <span class="sj-balken">
+            <span class="sj-stapel" style="height:{{ j.hoehe }}%">
+              {% for s in j.segmente %}
+                <span class="sj-seg" style="height:{{ s.anteil }}%;background:var(--chart-{{ s.slot }})"
+                      title="{{ s.titel }} {{ s.betrag | chf }}"></span>
+              {% endfor %}
+            </span>
+          </span>
+          <span class="sj-jahr">{{ j.jahr }}</span>
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="sj-legende">
+    {% for p in uebersicht.positionen %}
+      <span class="sj-key"><i style="background:var(--chart-{{ p.slot }})"></i>{{ p.titel }}</span>
+    {% endfor %}
+    {% if uebersicht.zeigt_vermoegen %}
+      <span class="sj-key"><i class="sj-key-linie"></i>Vermögen 31.12.</span>
+    {% endif %}
+    {% if uebersicht.laufendes %}
+      <span class="sj-key"><i class="sj-key-laufend"></i>{{ uebersicht.laufendes }} läuft noch</span>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{# Jahreswahl: nur Jahre, in denen es überhaupt Buchungen gibt. #}
+<div class="month-nav mb-4">
+  {% for j in verfuegbare_jahre[:6] %}
+    <a class="btn {{ 'btn-primary' if j == jahr else 'btn-ghost' }}" href="/steuern?jahr={{ j }}">{{ j }}</a>
+  {% endfor %}
+</div>
+
+{% if laufend %}
+  {# Ehrlichkeit statt stiller Halbwahrheit: fürs laufende Jahr sind die Summen
+     naturgemäss unvollständig, und das Vermögen ist der heutige Stand. #}
+  <div class="feedback err" style="margin-bottom:14px">
+    {{ jahr }} läuft noch: Summen unvollständig, Vermögen = <strong>heutiger</strong>
+    Stand statt 31.12.
+  </div>
+{% endif %}
+
+{# ----------  Abzüge  ----------
+   Eine Position trug bisher vier Zeilen: Titel, Betrag, eine Definition
+   („Grundversicherungs-Prämien.") und die Herkunft. Die Definition sagt, was
+   die Überschrift schon sagt, und man liest sie genau einmal — sie steht
+   deshalb gesammelt im Aufklapper am Fuss der Karte. Sichtbar bleibt, wonach
+   man die Seite öffnet: der Betrag und woraus er stammt.
+
+   Positionen mit Betrag 0 wandern hinter einen Aufklapper. Sie bleiben
+   erreichbar (man muss sehen, dass es sie gibt), füllen aber nicht mehr den
+   halben Handy-Schirm mit CHF 0.00. Positionen OHNE Kategorie bleiben oben
+   stehen: die sind kein leerer Posten, sondern eine Lücke im Kategorienbaum. #}
+{% macro steuer_zeile(p) %}
+  <div class="steuer-pos">
+    <div class="flex items-center justify-between gap-3">
+      <span>{{ p.titel }}</span>
+      {% if p.betrag is none %}
+        <span class="muted text-sm">keine Kategorie</span>
+      {% else %}
+        <span class="mono">{{ p.betrag | chf }}</span>
+      {% endif %}
+    </div>
+    {% if p.kategorien %}
+      <div class="muted text-sm">
+        <span class="steuer-quelle">aus: {{ p.kategorien | join(', ') }} · {{ p.anzahl }} Buchung{{ 'en' if p.anzahl != 1 }}</span>
+      </div>
+    {% endif %}
+  </div>
+{% endmacro %}
+
+{% set mit_betrag = positionen | rejectattr('betrag', 'equalto', 0) | list %}
+{% set ohne_betrag = positionen | selectattr('betrag', 'equalto', 0) | list %}
+<div class="card mb-4">
+  <div class="label-cap card-head">Abzüge {{ jahr }}</div>
+  <div class="data-cols">
+    {% for p in mit_betrag %}{{ steuer_zeile(p) }}{% endfor %}
+  </div>
+
+  {% if ohne_betrag %}
+    <details class="disclosure">
+      <summary class="text-sm">{{ ohne_betrag | length }} ohne Betrag</summary>
+      <div class="data-cols">
+        {% for p in ohne_betrag %}{{ steuer_zeile(p) }}{% endfor %}
+      </div>
+    </details>
+  {% endif %}
+
+  <details class="disclosure">
+    <summary class="text-sm">Was zählt zu welcher Position</summary>
+    <div class="data-cols">
+      {% for p in positionen %}
+        <div class="steuer-pos">
+          <div>{{ p.titel }}</div>
+          <div class="muted text-sm">{{ p.hinweis }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  </details>
+</div>
+
+{# ----------  Vermögen per Stichtag  ---------- #}
+<div class="card mb-4">
+  <div class="vermoegen-head">
+    <div class="label-cap">Vermögen per 31.12.{{ jahr }}</div>
+    <div class="vt-value">{{ vermoegen | chf }}</div>
+  </div>
+  {% for k in konten %}
+    <div class="row">
+      <span>{{ k.konto.name }}</span>
+      <span class="mono">{{ k.saldo | chf }}</span>
+    </div>
+  {% endfor %}
+</div>
+
+{# Der Haftungshinweis BLEIBT ein Satz: hier droht eine Folge — man könnte die
+   Summen für Steuerbeträge halten und ungeprüft deklarieren. Gekürzt ist nur,
+   was keine Folge hat: WIE die Positionen entstehen (Stichwörter in den
+   Kategorienamen) ist eine Einmal-Erklärung und steht jetzt im Aufklapper. #}
+<div class="card sunken">
+  <p class="muted text-sm" style="margin:0">
+    <strong>Keine Steuerberechnung</strong> — nur die Summe deiner Buchungen. Was
+    abzugsfähig ist, entscheidet die Steuerbehörde.
+  </p>
+  <details class="disclosure">
+    <summary class="text-sm">Zuordnung stimmt nicht?</summary>
+    <p class="muted text-sm" style="margin:8px 0 0">
+      Die Positionen werden über Stichwörter im Kategorienamen erkannt
+      (<a href="/categories">Kategorien verwalten</a>).
+    </p>
+  </details>
+</div>
+{% endblock %}

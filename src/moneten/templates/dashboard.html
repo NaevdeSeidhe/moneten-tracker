@@ -1,0 +1,468 @@
+{% extends "_shell.html" %}
+{% block title %}Übersicht — Moneten-Tracker{% endblock %}
+
+{# ----------  Donut-Makro: ein Ring + Legende für eine Konto-Gruppe  ---------- #}
+{% macro donut(chart, dom_id, title, center_label) %}
+<div class="donut-col">
+  <div class="donut-col-head">
+    <span class="donut-col-title">{{ title }}</span>
+  </div>
+  {% if chart.segments %}
+  <div class="donut-wrap" id="{{ dom_id }}" data-total="{{ chart.total | chf }}" data-total-label="{{ center_label }}">
+    <svg class="donut" viewBox="0 0 220 220" aria-label="{{ title }}">
+      <circle class="donut-track" cx="110" cy="110" r="{{ donut_r }}"></circle>
+      {% for s in chart.segments %}
+      <circle class="donut-seg" data-idx="{{ s.idx }}"
+              cx="110" cy="110" r="{{ donut_r }}" stroke="{{ s.color }}"
+              stroke-dasharray="{{ s.dash }} {{ s.gap }}" stroke-dashoffset="{{ s.offset }}"
+              data-name="{{ s.name }}" data-balance="{{ s.balance | chf }}" data-pct="{{ s.pct }}"></circle>
+      {% endfor %}
+    </svg>
+    <div class="donut-center">
+      <div class="dc-big" data-countup="{{ chart.total }}">{{ chart.total | chf }}</div>
+      <div class="dc-label">{{ center_label }}</div>
+    </div>
+  </div>
+  {% else %}
+  <div class="donut-empty">
+    <div class="donut-empty-ring">
+      <span class="dc-big">{{ chart.total | chf }}</span>
+    </div>
+    <span class="muted text-sm">Noch kein Guthaben</span>
+  </div>
+  {% endif %}
+  {# Die Betraege stehen mit `chf_wert` ohne Waehrungskuerzel da: „CHF" nennt
+     der Kartenkopf und die Ringmitte, in der Legende stuende es siebenmal
+     darunter noch einmal. Gemessen bei 375 px kostete es 29 px je Zeile — genau
+     die Breite, die dem Kontonamen fehlte („Privatkonto" wurde zu
+     „Privatkon…"). Dieselbe Ueberlegung wie in der Buchungsliste. #}
+  <div class="legend">
+    {% set ns = namespace(si=0) %}
+    {% for l in chart.legend %}
+      {% if l.active %}
+      <div class="legend-item" data-target="{{ dom_id }}" data-idx="{{ ns.si }}">
+        <span class="legend-name"><span class="legend-swatch" style="background:{{ l.color }}"></span><span class="legend-label" title="{{ l.name }}">{{ l.name }}</span></span>
+        <span class="legend-val">{{ l.balance | chf_wert }}</span>
+      </div>
+      {% set ns.si = ns.si + 1 %}
+      {% else %}
+      <div class="legend-item is-zero">
+        <span class="legend-name"><span class="legend-swatch" style="background:{{ l.color }}"></span><span class="legend-label" title="{{ l.name }}">{{ l.name }}</span></span>
+        <span class="legend-val">{{ l.balance | chf_wert }}</span>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endmacro %}
+
+{# ----------  Kassensturz-Erinnerung  ----------
+   Ein Makro, weil die Erinnerung an ZWEI Stellen stehen muss. Ihr Platz ist die
+   Karte „Bar bezahlt": die Zählung ist das, was deren Quote überhaupt genau
+   macht. Jene Karte hängt aber an `mix.hat_daten` — ohne Alltagsausgaben in
+   zwölf Monaten fehlt sie, und die Erinnerung fehlte mit ihr. Genau dann hat
+   niemand mehr Bargeld gebucht, und genau dann ist Zählen fällig; eine
+   Erinnerung, die bei Bedarf verschwindet, ist keine. Fehlt die Karte, steht die
+   Erinnerung an deren Platz in der Seite — dieselbe Stelle im Lesefluss, damit
+   sie nicht von Monat zu Monat springt.
+   `nutzen` ist der Grund zum Zählen und darum verschieden: in der Karte zeigt er
+   auf die Quote darunter, allein steht diese Quote nicht da.
+
+   `is-solo` steht als Bedingungs-ZWEIG im Klassenattribut und nicht als
+   Jinja-Ausdruck. Der Markup-Waechter schneidet Ausdruecke aus dem
+   Klassenattribut heraus, bevor er die Namen liest; als Ausdruck war die Klasse
+   fuer ihn unsichtbar, und ihre CSS-Regel liess sich spurlos loeschen — weder
+   „Klasse ohne Regel" noch „Regel ohne Markup" konnte greifen. Aus dem Zweig
+   bleibt der Name stehen, damit sehen ihn beide. #}
+{% macro kassensturz_erinnerung(k, nutzen, solo=false) %}
+<a class="mix-erinnerung {% if solo %}is-solo{% endif %}" href="/accounts">
+  {{ icon('cash') }}
+  <span>
+    <strong>Kassensturz fällig</strong> —
+    {% if k.letzter %}zuletzt vor {{ k.tage_her }} Tagen
+    ({{ k.letzter.strftime('%d.%m.%Y') }}){% else %}noch nie gezählt{% endif %}.
+    {{ nutzen }}
+  </span>
+</a>
+{% endmacro %}
+
+{% block content %}
+
+{# Persönlicher Hero-Streifen: Begrüssung + Datum statt direkt nackte Zahlen. #}
+<div class="hero">
+  <div>
+    <h1 class="hero-greeting">{{ greeting }}, {{ user.name }}</h1>
+    <div class="hero-sub">{{ heute_label() }}</div>
+  </div>
+  <div class="hero-aside">
+    {% if uncategorized %}
+      {% set done_pct = ((cat_done / cat_total * 100) | round) if cat_total else 0 %}
+      {# Zwei Zahlen statt vier: „192 von 198 erledigt" sagt dasselbe wie „6
+         offen" und steht als Balken ohnehin schon darunter (Regel: keine
+         Erklärung dessen, was man sieht). Übrig bleibt der Rest, der Arbeit
+         macht — und der Nenner, ohne den der Balken keine Grösse hat. #}
+      <a class="cat-funnel" href="/rules" title="Zu den Kategorisierungs-Regeln">
+        <span class="cat-funnel-top">⚠ {{ uncategorized }} von {{ cat_total }} offen</span>
+        <span class="cat-funnel-bar"><span style="width:{{ done_pct }}%"></span></span>
+      </a>
+    {% else %}
+      <span class="pill" style="color:var(--accent-tertiary)">✓ {{ cat_total }} kategorisiert</span>
+    {% endif %}
+  </div>
+</div>
+
+{# KPI-Übersicht: Liquide Mittel + Monatszahlen kompakt in EINER Card.
+   Desktop: 4 Spalten mit dünnen Trennlinien. Mobil: „Liquide Mittel" als
+   Headline über die volle Breite, darunter Eingang/Ausgang/Saldo als kompakte
+   3-Spalten-Zeile — statt vier raumgreifender Einzel-Cards. #}
+<div class="card kpi-card mb-4">
+  {# Titelzeile im GLEICHEN Muster wie „Vermögensaufteilung": Label links, Betrag
+     rechts, auf abgesetztem Band. Vorher stand „Liquide Mittel" als normales
+     metric-label mitten in der ersten Rasterzelle und sah dadurch anders aus als
+     jede andere Kartenüberschrift. #}
+  <div class="vermoegen-head">
+    <div class="label-cap">Liquide Mittel</div>
+    <div class="vt-value" data-countup="{{ liquide }}">{{ liquide | chf }}</div>
+  </div>
+  {% if liquide_pct is not none %}
+    <div class="share" style="margin-bottom:14px">
+      <div class="share-bar"><span style="width:{{ liquide_pct }}%"></span></div>
+    </div>
+  {% endif %}
+  {# Fehlt der Vormonatsvergleich BEI ALLEN drei Zahlen — der Normalfall in einem
+     frisch begonnenen Monat, und beim Nutzer der Regelfall zwischen zwei
+     Importen —, steht „laufender Monat" EINMAL unter dem Raster statt dreimal
+     darin. Dreimal derselbe Satz nebeneinander liest sich als Fehler, nicht als
+     Erklärung; gemessen bei 375 px belegte er drei von neun Zeilen der Karte.
+     Trifft es dagegen nur eine der drei Zahlen, bleibt der Hinweis an ihr —
+     dann sagt er etwas über SIE aus und nicht über den Monat. #}
+  {% set ohne_vergleich = metrics | selectattr('pct', 'none') | list %}
+  {% set alle_ohne_vergleich = ohne_vergleich | length == metrics | length %}
+  <div class="kpi-grid">
+    {# Flow-Kennzahlen: Wert + Vormonatsvergleich + 6-Monats-Sparkline.
+       Beim leeren Monat standen sie früher gar nicht da — „3× CHF 0.00 sparen".
+       Gemessen blieb davon eine 100 px hohe Karte mit nur „Liquide Mittel"
+       darin, das Raster hatte Höhe 0. Der Nutzer importiert rund einmal im
+       Monat; genau dann verschwanden sie, und genau das hat er als Fehler
+       gemeldet. Drei ehrliche Nullen mit „laufender Monat" darunter sagen mehr
+       als eine leere Karte, und WARUM sie null sind, steht eine Karte tiefer am
+       Geldfluss. #}
+    {% for m in metrics %}
+    <div class="kpi-cell">
+      <div class="metric-label">{{ m.label }}</div>
+      <div class="metric-value" data-countup="{{ m.value }}" style="color:{{ m.value_color }}">{{ m.value | chf }}</div>
+      <div class="metric-foot" style="color:{{ m.spark_color }}">
+        <div class="trend-row">
+          {% if m.pct is not none %}
+            {% set up = m.pct > 0 %}
+            {% set good = (up and m.good_up) or (m.pct < 0 and not m.good_up) %}
+            <span class="trend {{ 'trend-good' if good else ('trend-bad' if m.pct != 0 else 'trend-flat') }}">{{ '▲' if up else ('▼' if m.pct < 0 else '◆') }} {{ m.pct | abs }}%</span>
+            <span class="trend-note">ggü. Vormonat</span>
+          {% elif not alle_ohne_vergleich %}
+            <span class="metric-note">laufender Monat</span>
+          {% endif %}
+        </div>
+        {% if has_history %}
+        <svg class="spark spark-interactive" viewBox="0 0 116 34" preserveAspectRatio="none"
+             data-points='{{ m.points | tojson }}'>
+          <path class="spark-area" d="{{ m.spark.area }}"></path>
+          <path class="spark-line" d="{{ m.spark.line }}"></path>
+          <circle class="spark-dot" cx="{{ m.spark.last_x }}" cy="{{ m.spark.last_y }}" r="2.6"></circle>
+          {# Beweglicher Hover-Punkt + transparente Trefferfläche über die ganze Breite. #}
+          <circle class="spark-hover-dot" r="3.2" style="display:none"></circle>
+          <rect class="spark-hit" x="0" y="0" width="116" height="34" fill="transparent"></rect>
+        </svg>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% if alle_ohne_vergleich %}
+    <div class="metric-note kpi-fuss">laufender Monat</div>
+  {% endif %}
+</div>
+
+{# ----------  Vermögensaufteilung: zwei Donuts (Ausgeben vs. Sparen)  ---------- #}
+<div class="card vermoegen-card mb-4">
+  <div class="vermoegen-head">
+    <div class="label-cap">Vermögensaufteilung</div>
+    <div class="vt-value" data-countup="{{ total_assets }}">{{ total_assets | chf }}</div>
+  </div>
+  <div class="donut-duo">
+    {{ donut(chart_liquid, "donut-liquid", "Ausgeben", "verfügbar") }}
+    <div class="donut-divider"></div>
+    {{ donut(chart_savings, "donut-savings", "Sparen & Anlage", "angespart") }}
+  </div>
+</div>
+
+{# ----------  Bar gegen digital  ----------
+   Die Balken sind auf 100 % normiert: gefragt ist der ANTEIL, und nur so lassen
+   sich Monate mit unterschiedlich hohen Ausgaben überhaupt vergleichen. Der
+   Nenner sind bewusst nur Alltagsausgaben — Miete und Krankenkasse kann man
+   nicht bar zahlen, sie würden die Quote strukturell kleinrechnen. #}
+{% if mix.hat_daten %}
+<div class="card mb-4">
+  <div class="vermoegen-head">
+    <div class="label-cap">Bar bezahlt</div>
+    <div class="vt-value">{{ mix.aktuell.pct if mix.aktuell.pct is not none else '—' }}%</div>
+  </div>
+
+  {# Erste der beiden Stellen (siehe Makro oben): solange es diese Karte gibt,
+     ist sie der Platz der Erinnerung — die Quote steht direkt darunter, und die
+     Zählung ist das, was sie überhaupt genau macht. #}
+  {% if kassensturz.faellig %}
+    {{ kassensturz_erinnerung(kassensturz, "Bargeld zählen macht die Quote unten genau.") }}
+  {% endif %}
+
+  {# Plotfläche und Monatsbeschriftung sind GETRENNT: so lässt sich die Ziellinie
+     mit `bottom: <ziel>%` exakt auf die Balkenhöhe legen, statt die Labelhöhe
+     einzurechnen. Solche Rechnungen verrutschen still, sobald sich eine
+     Schriftgrösse ändert. #}
+  <div class="mix-chart" style="--ziel: {{ mix.ziel_pct }}">
+    <div class="mix-plot">
+      {% if mix.ziel_pct %}
+        <span class="mix-ziel" title="Dein Ziel: {{ mix.ziel_pct }}% bar"><i>{{ mix.ziel_pct }}%</i></span>
+      {% endif %}
+      {% for m in mix.monate %}
+        <span class="mix-col"
+              title="{{ m.label }} {{ m.jahr }} · bar {{ m.bar_total | chf }} von {{ m.summe | chf }}{% if m.bar_unerfasst %} (davon {{ m.bar_unerfasst | chf }} nicht erfasst){% endif %}">
+          <span class="mix-stack">
+            {% if m.summe > 0 %}
+              <i class="mix-digital" style="height:{{ 100 - m.pct_bar - m.pct_unerfasst }}%"></i>
+              <i class="mix-unerfasst" style="height:{{ m.pct_unerfasst }}%"></i>
+              <i class="mix-bar" style="height:{{ m.pct_bar }}%"></i>
+            {% endif %}
+          </span>
+        </span>
+      {% endfor %}
+    </div>
+    <div class="mix-labels">
+      {% for m in mix.monate %}
+        <span{% if loop.last %} class="is-jetzt"{% endif %}>{{ m.label }}</span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="budget-hero-foot">
+    <span><span class="mix-key bar"></span>bar · <span class="mix-key digital"></span>digital{% if mix.unerfasst_gesamt %} · <span class="mix-key unerfasst"></span>nicht erfasst{% endif %}</span>
+    <span class="mono">{% if mix.schnitt_pct is not none %}Ø {{ mix.schnitt_pct }}%{% endif %}</span>
+  </div>
+
+  {% if mix.unerfasst_gesamt %}
+    {# Ehrlichkeit vor Motivation: fehlendes Bargeld ist kein Disziplin-Problem,
+       sondern ein Erfassungs-Problem — und der Kassensturz weiss das bereits.
+
+       Die BEGRÜNDUNG dazu ist eine Einmal-Erklärung: wer sie einmal gelesen
+       hat, braucht sie nie wieder, und sie stand als Dauertext über vier
+       Zeilen (375 px gemessen) mitten in der Karte. Sichtbar bleibt, was sich
+       von Monat zu Monat ändert — der Betrag und sein Etikett. Der Rest steht
+       einen Griff entfernt und ist vollständig erhalten. #}
+    <details class="disclosure mix-aufklapper">
+      <summary><span class="mono">{{ mix.unerfasst_gesamt | chf }}</span> nicht erfasst</summary>
+      <p class="muted text-sm" style="margin:6px 0 0">
+        Aus Kassensturz-Korrekturen: bar bezahlt, aber nie erfasst. Erfasst du diese
+        Ausgaben, wird die Quote genauer (und vermutlich höher).
+      </p>
+    </details>
+  {% endif %}
+
+  <details class="disclosure mix-aufklapper">
+    <summary>Wo du bar zahlst · Ziel setzen</summary>
+    <div class="mix-cats">
+      {% for k in mix.kategorien %}
+        <div class="mix-cat">
+          <span class="mix-cat-name">{{ icon(k.icon) }}{{ k.name }}</span>
+          <span class="bar mix-cat-bar" title="{{ k.pct }}% bar"><span class="mix-bar" style="width:{{ k.pct }}%"></span></span>
+          <span class="mono text-sm">{{ k.pct }}%</span>
+        </div>
+      {% endfor %}
+    </div>
+    <form class="flex items-center gap-2 mt-4" hx-post="/settings/cash-goal"
+          hx-target="body" hx-swap="none">
+      <label for="cash-goal" class="text-sm" style="color:var(--text-secondary)">Ziel-Anteil bar</label>
+      <input id="cash-goal" name="pct" type="number" min="0" max="100" step="5"
+             value="{{ mix.ziel_pct }}" style="width:90px" inputmode="numeric">
+      <span class="muted text-sm">%</span>
+      <button type="submit" class="btn btn-ghost text-sm">Speichern</button>
+    </form>
+  </details>
+</div>
+{% endif %}
+
+{# Zweite Stelle: die Karte oben fehlt, die Erinnerung nimmt ihren Platz ein.
+   Ohne sie wäre die Erinnerung ausgerechnet dann weg, wenn zwölf Monate lang
+   keine Alltagsausgabe gebucht wurde. #}
+{% if kassensturz.faellig and not mix.hat_daten %}
+  {{ kassensturz_erinnerung(kassensturz, "Bargeld zählen korrigiert den Kassenstand.", solo=true) }}
+{% endif %}
+
+{# ----------  Was kommt: Fristen + erkannte Jahresposten  ----------
+   Steht nur da, wenn wirklich etwas ansteht. Eine Karte, die dauerhaft „nichts
+   zu tun" meldet, wird nach zwei Wochen nicht mehr gelesen — und dann auch
+   nicht, wenn doch etwas drinsteht. #}
+{# Die Warnung über veraltete Fristen hing bis hierher an `kommt.posten` und
+   verschwand damit vier Monate im Jahr — April bis Juli steht im Dreimonats-
+   fenster nichts an, und mit der Liste ging die Warnung mit. Eine Warnung, die
+   man nur manchmal sieht, ist keine. #}
+{% if kommt.posten or kommt.veraltet %}
+<div class="card mb-4">
+  <div class="label-cap card-head">Was kommt</div>
+  {% if kommt.veraltet %}
+    <div class="feedback err" style="margin-bottom:10px">
+      Die hinterlegten Fristen und der 3a-Maximalbetrag sind vom Stand {{ kommt.fristen_stand }}
+      und damit womöglich überholt. Bitte gegen die aktuellen Werte prüfen.
+    </div>
+  {% endif %}
+  {% if kommt.posten %}
+  {# Die Zeile trägt WANN, WAS und WIEVIEL — deswegen schaut man auf diese Karte.
+     Der Hinweis dahinter beantwortet WARUM und ist bei jedem Posten eine
+     Einmal-Erklärung: „Wechsel auf den 1. Januar: Kündigung muss bis 30.11.
+     beim Versicherer sein" liest man einmal und danach nie wieder. Als
+     Dauertext kostete er bei 375 px drei bis vier Zeilen JE POSTEN — die Karte
+     mass 482 px, und die erste Zahl stand erst nach 159 px.
+
+     Darum ein Aufklapper je Zeile statt einer eigenen Karte voller Fussnoten:
+     der Hinweis gehört an seinen Posten, nicht an eine Liste weiter unten.
+     Gebaut wie `.pv-head` beim Preisverlauf — dasselbe Muster, dieselbe
+     Trefferfläche, damit die Übersicht nicht ihr eigenes Bauteil erfindet. #}
+  <div class="kommt-liste">
+    {% for p in kommt.posten %}
+      <details class="kommt-zeile">
+        <summary>
+          <span class="kommt-datum mono">{{ p.datum.strftime('%d.%m.') }}</span>
+          <strong class="kommt-text">{{ p.titel }}</strong>
+          <span class="kommt-betrag mono">{{ (p.betrag | chf_kurz) if p.betrag else '' }}</span>
+        </summary>
+        <p class="kommt-hinweis muted text-sm">{{ p.hinweis }}</p>
+      </details>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if kommt.summe %}
+    {# Wert und Etikett statt Satz. „Erwartete Jahreszahlungen" bleibt stehen und
+       wird nicht zu „Erwartet": genau dieses Wortpaar hält die Summe von den
+       Fristen getrennt, die keinen Betrag tragen (test_summe_zaehlt_keine_frist_mit).
+       Woher Termin und Betrag stammen, steht am Posten selbst. #}
+    <div class="kommt-summe">
+      <span>Erwartete Jahreszahlungen</span>
+      <span class="mono">{{ kommt.summe | chf }}</span>
+    </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ----------  Geldfluss-Sankey (Flaggschiff)  ----------
+   Die KARTE steht immer, nur ihr Inhalt wechselt. Vorher umschloss die
+   flow-Bedingung die ganze Karte, und die verschwand lautlos, sobald der
+   laufende Monat noch keine Buchungen hatte — der Nutzer importiert etwa einmal
+   im Monat und hielt die Karte deshalb für gelöscht. Eine Karte, die sich
+   lautlos ausblendet, ist von einer entfernten nicht zu unterscheiden. #}
+<div class="card mb-4 flow-card">
+  <div class="label-cap card-head">Geldfluss{% if flow_zeitraum %} · {{ flow_zeitraum }}{% endif %}</div>
+  {# Der Hinweis steht AUSSERHALB der flow-Bedingung. Innerhalb fehlte er genau
+     dann, wenn er am nötigsten war: steht im Kopf ein fremder Monat, während
+     das Diagramm leer bleibt, ist die Karte ohne ihn nicht mehr zu erklären. #}
+  {% if flow_veraltet %}
+    {# Der Satz bleibt ungekuerzt: er sagt, dass der Kopf dieser Karte einen
+       ANDEREN Monat nennt als heute — ein veralteter Wert ist genau der Fall,
+       in dem der Satz die Information ist. Gekuerzt ist nur der Weg dorthin:
+       Text und Weg stehen als zwei Zeilen-Teile nebeneinander, damit der Link
+       sein 44-px-Tippziel bekommen kann, ohne den Satz auseinanderzureissen. #}
+    <p class="flow-hinweis"><span>{{ flow_laufend }} ist noch ohne Buchungen.</span> <a href="/import">Import</a></p>
+  {% endif %}
+  {% if flow %}
+  <div class="flow-scroll">
+    <svg class="flow-svg" viewBox="0 0 {{ flow.width }} {{ flow.height }}" role="img" aria-label="Geldfluss {{ flow_zeitraum }}">
+      {# Bänder zuerst (liegen unter den Knoten) #}
+      {% for l in flow.links %}
+        <path d="{{ l.path }}" fill="{{ l.color }}" fill-opacity="0.30" class="flow-link"></path>
+      {% endfor %}
+      {# Einnahme-Knoten (links) #}
+      {% for n in flow.left %}
+        <rect x="{{ n.x }}" y="{{ n.y0 }}" width="{{ flow.node_w }}" height="{{ n.h }}" rx="3" fill="{{ n.color }}"></rect>
+        {# `label_y` statt `mid`: bei kleinen Betraegen ist der Balken nur wenige
+           Einheiten hoch, und zwei Beschriftungen lagen uebereinander. Der
+           Balken bleibt auf seiner Mitte, nur der Text weicht aus. #}
+        <text class="flow-label" x="{{ n.x - 10 }}" y="{{ n.label_y }}" text-anchor="end" dominant-baseline="middle">{{ n.label }} · {{ n.amount | chf }}</text>
+      {% endfor %}
+      {# Budget-Hub (Mitte) #}
+      <rect x="{{ flow.hub.x }}" y="{{ flow.hub.y0 }}" width="{{ flow.node_w }}" height="{{ flow.hub.h }}" rx="3" fill="var(--text-secondary)"></rect>
+      <text class="flow-label flow-hub-label" x="{{ flow.hub.x + flow.node_w / 2 }}" y="{{ flow.hub.y0 - 9 }}" text-anchor="middle">{{ flow.hub.label }} · {{ flow.hub.amount | chf }}</text>
+      {# Ausgabe-Knoten (rechts) #}
+      {% for n in flow.right %}
+        <rect x="{{ n.x }}" y="{{ n.y0 }}" width="{{ flow.node_w }}" height="{{ n.h }}" rx="3" fill="{{ n.color }}"></rect>
+        {# Rechtsbündig an der Diagrammkante statt linksbündig am Knoten: mit
+           `start` wuchsen die Beschriftungen nach rechts aus dem viewBox heraus
+           und wurden dort abgeschnitten — sichtbar, seit die Schrift von 3px auf
+           lesbare 13px gewachsen ist. Die Zuordnung bleibt über die gemeinsame
+           y-Position (n.mid) erhalten. #}
+        <text class="flow-label" x="{{ flow.width - 6 }}" y="{{ n.label_y }}" text-anchor="end" dominant-baseline="middle">{{ n.label }} · {{ n.amount | chf }}</text>
+      {% endfor %}
+    </svg>
+  </div>
+  {% else %}
+  <p class="flow-hinweis">{{ flow_grund }}</p>
+  {# Eigene Klasse, damit der Test diesen Knopf prüfen kann: „href=/import" steht
+     dreimal in der Navigation und war als Nachweis wertlos — der Knopf liess
+     sich löschen, ohne dass ein Test rot wurde. #}
+  <a class="btn flow-import" href="/import">Bankauszug importieren</a>
+  {% endif %}
+</div>
+
+<div class="grid-main">
+
+  {# ----------  Schnellzugriff  ---------- #}
+  <div class="card">
+    <div class="label-cap card-head">Schnellzugriff</div>
+    {# 2×2-Raster spart Platz (v.a. mobil). Offline-Hinweis steht im Footer.
+
+       Ein Wort je Ziel, wo das Verb nichts hinzufügt: das „+" sagt erfassen,
+       „Quittungen" und „Budget" sind Seitennamen. Bei 375 px sind die Kacheln
+       148 px breit — mit dem Verb brach JEDE der vier auf zwei Zeilen um und
+       die Karte mass 205 px statt 150 px. „Schnell erfassen" behält sein Verb:
+       es ist der Name der Seite, und „Schnell" allein sagt nichts. #}
+    <div class="quickaccess-grid">
+      <a class="btn full-w" href="/transactions?form=new">+ Buchung</a>
+      {# CAMT-Import nur am PC: Bankauszüge lädt man nicht am Handy herunter.
+         Am Handy steht dort stattdessen das Schnell-Erfassen — die Aktion, die
+         unterwegs wirklich gebraucht wird. #}
+      <a class="btn full-w only-desktop" href="/import">CAMT.053 importieren</a>
+      {# Ohne Blitz-Zeichen: es kostete gemessene 22 px, und mit ihm passt der
+         Name der Zielseite bei 375 px nicht auf eine Zeile. Der Name bleibt —
+         „Schnell" allein muesste man raten. #}
+      <a class="btn full-w only-mobile" href="/quick">Schnell erfassen</a>
+      <a class="btn full-w" href="/import/receipts">Quittungen</a>
+      <a class="btn full-w" href="/budget">Budget</a>
+    </div>
+  </div>
+
+  {# Grösste Ausgaben — derselbe Zeitraum wie beim Geldfluss, und er steht im
+     Kopf. Vorher hiess es „diesen Monat", während die Karte darüber schon
+     ausgewichen war: zwei Karten, zwei Monate, keine Erklärung. #}
+  <div class="card sunken">
+    {# Derselbe Zeitraum-Vertrag wie beim Geldfluss, bis in die Schreibweise:
+       gibt es keinen gezeigten Monat, steht auch keiner da. #}
+    <div class="label-cap card-head">Grösste Ausgaben{% if ausgaben_zeitraum %} · {{ ausgaben_zeitraum }}{% endif %}</div>
+    {% if treemap %}
+      <div class="treemap" role="img" aria-label="Grösste Ausgaben als Flächen-Diagramm">
+        {% for t in treemap %}
+          <div class="tm-tile" data-tip="{{ t.label }} · {{ t.value | chf }} · {{ t.pct }}%"
+               style="left:{{ t.x }}%; top:{{ t.y }}%; width:{{ t.w }}%; height:{{ t.h }}%; --tm-color:{{ t.color }}; --tm-delay:{{ loop.index0 * 60 }}ms">
+            <span class="tm-inner">
+              <span class="tm-ico">{{ icon(t.icon) }}</span>
+              <span class="tm-name">{{ t.label }}</span>
+              <span class="tm-val mono" data-countup="{{ t.value }}">{{ t.value | chf }}</span>
+            </span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      {# Ohne Monatsangabe: der Zeitraum steht eine Zeile höher im Kopf. „Noch
+         keine Ausgaben in diesem Monat" stand dort früher — und meinte den
+         laufenden, während der Kopf längst einen anderen zeigte. #}
+      <div class="muted text-sm" style="padding:8px 0">Keine Ausgaben erfasst.</div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

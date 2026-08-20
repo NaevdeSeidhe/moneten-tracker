@@ -1,0 +1,45 @@
+{% extends "_shell.html" %}
+{% block title %}Prognose & Stresstest — Moneten-Tracker{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div>
+    <h1 class="hero-greeting">Prognose &amp; Stresstest</h1>
+  </div>
+</div>
+
+{# ----------  12-Monats-Vermögens-Prognose  ---------- #}
+<div class="card mb-4">
+  <div class="label-cap" style="margin-bottom:12px">12-Monats-Prognose · Vermögen</div>
+  <svg viewBox="0 0 {{ projection.width }} {{ projection.height }}" class="forecast-chart spark-interactive"
+       preserveAspectRatio="none" role="img" aria-label="Vermögens-Prognose"
+       data-points='{{ proj_points | tojson }}'>
+    <polyline id="fc-hist-line" points="{{ projection.points_hist }}" fill="none" stroke="var(--accent-tertiary)" stroke-width="2.5"
+              stroke-linejoin="round" stroke-linecap="round"/>
+    <polyline id="fc-fc-line" points="{{ projection.points_fc }}" fill="none" stroke="var(--accent-primary)" stroke-width="2.5"
+              stroke-dasharray="6 5" stroke-linejoin="round" stroke-linecap="round"/>
+    {# Stresstest-Linie (wird vom Slider live gezeichnet). #}
+    <polyline id="fc-stress-line" points="" fill="none" stroke="var(--dusty-rose)" stroke-width="2.5"
+              stroke-dasharray="3 4" stroke-linejoin="round" stroke-linecap="round" style="display:none"/>
+    <line class="spark-hover-line" x1="0" y1="0" x2="0" y2="{{ projection.height }}" style="display:none"></line>
+  </svg>
+  <div class="flex items-center justify-between" style="margin-top:10px;flex-wrap:wrap;gap:8px">
+    <span class="text-sm muted">
+      <span style="color:var(--accent-tertiary)">━</span> bisher ·
+      <span style="color:var(--accent-primary)">╌ ╌</span> Prognose
+      <span id="fc-stress-legend" hidden>· <span style="color:var(--dusty-rose)">·····</span> Stresstest</span>
+    </span>
+    <span>In 12 Monaten ≈ <strong style="color:var(--accent-primary)">{{ projection.end_value | chf }}</strong>
+      <span id="fc-stress-end" hidden> · Szenario ≈ <strong style="color:var(--dusty-rose)"></strong></span>
+    </span>
+  </div>
+</div>
+
+{# Konfig für das Live-Update des Stresstests (vom JS gelesen, keine Skript-Ausführung). #}
+<div id="stress-data" data-cfg='{{ stress_cfg | tojson }}' hidden></div>
+
+{# ----------  Stresstest (HTMX-Teil)  ---------- #}
+<div id="stress-root">
+  {% include "partials/forecast_stress.html" %}
+</div>
+{% endblock %}

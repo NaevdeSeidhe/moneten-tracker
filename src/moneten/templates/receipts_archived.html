@@ -1,0 +1,46 @@
+{% extends "_shell.html" %}
+{% block title %}Archivierte Belege — Moneten-Tracker{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div><h1 class="hero-greeting">Archivierte Belege</h1></div>
+  <div class="hero-aside"><a class="btn btn-ghost" href="/import/receipts">← zurück zum Assistenten</a></div>
+</div>
+
+{% if not rows %}
+  <div class="card"><div class="banner-ok">✓ Es ist nichts archiviert.</div></div>
+{% else %}
+  <div class="card">
+    <div class="flex items-center justify-between" style="gap:12px;flex-wrap:wrap">
+      <div class="muted text-sm">
+        {{ rows|length }} archivierte Belege — Dateien bleiben im Ordner.
+      </div>
+      <form hx-post="/import/receipts/unarchive-all" hx-target="#unarch-result" hx-swap="innerHTML"
+            hx-confirm="Alle per Sammel-Archiv abgelegten Belege (ohne Bankbuchung) wieder aktivieren?">
+        <input type="hidden" name="reason" value="ohne-bankbuchung">
+        <button type="submit" class="btn btn-primary btn-sm">↩ Sammel-Archiv reaktivieren</button>
+      </form>
+    </div>
+    <div id="unarch-result" class="mt-4"></div>
+  </div>
+
+  {% for r in rows %}
+    <div class="card" id="arch-{{ loop.index }}" style="margin:10px 0;padding:10px 14px">
+      <div class="flex items-center justify-between" style="gap:12px;flex-wrap:wrap">
+        <div style="min-width:0">
+          <strong>{{ r.name }}</strong>
+          <div class="text-sm muted">
+            {{ r.reason_label }}
+            {% if r.exists %} · <a href="/import/receipts/file?name={{ r.name | urlencode }}" target="_blank" rel="noopener">öffnen ↗</a>
+            {% else %} · <span style="color:var(--text-tertiary)">Datei nicht mehr im Ordner</span>{% endif %}
+          </div>
+        </div>
+        <form hx-post="/import/receipts/unarchive" hx-target="#arch-{{ loop.index }}" hx-swap="innerHTML">
+          <input type="hidden" name="filename" value="{{ r.name }}">
+          <button type="submit" class="btn btn-ghost btn-sm">↩ Reaktivieren</button>
+        </form>
+      </div>
+    </div>
+  {% endfor %}
+{% endif %}
+{% endblock %}

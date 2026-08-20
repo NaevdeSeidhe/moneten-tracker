@@ -1,0 +1,103 @@
+{# Stresstest-Teil: Slider + Ergebnis. Updates laufen LIVE im Browser (JS),
+   ohne Server-Roundtrip — die Startwerte (0/0/0) kommen vom Server. #}
+<div class="card">
+  <div class="label-cap card-head">Stresstest</div>
+
+  {# Schnellszenarien: setzen die Regler mit einem Klick (JS), spart Kurbeln. #}
+  <div class="stress-presets" id="stress-presets" aria-label="Schnellszenarien">
+    <button type="button" class="stress-preset" data-preset data-reset="1">Zurücksetzen</button>
+    <button type="button" class="stress-preset" data-preset data-income="-20">−20 % Einkommen</button>
+    <button type="button" class="stress-preset" data-preset data-income="-90">Jobverlust</button>
+    <button type="button" class="stress-preset" data-preset data-expense="20">+20 % Ausgaben</button>
+    <button type="button" class="stress-preset" data-preset data-onetime="5000">Grossausgabe 5'000</button>
+  </div>
+
+  <div class="stress-form" id="stress-form">
+
+    {# ----- Einkommen-Slider: rechts (mehr) = grün/positiv, links (weniger) = rose ----- #}
+    {% set i_min = -90 %}{% set i_max = 50 %}
+    {% set i_zero = ((0 - i_min) / (i_max - i_min) * 100) | round(2) %}
+    {% set i_pos = ((income_pct - i_min) / (i_max - i_min) * 100) | round(2) %}
+    {% set i_lo = [i_zero, i_pos] | min %}{% set i_hi = [i_zero, i_pos] | max %}
+    {% set i_col = 'var(--accent-tertiary)' if income_pct > 0 else ('var(--dusty-rose)' if income_pct < 0 else 'var(--border-emphasis)') %}
+    <div class="stress-field">
+      <div class="stress-label">
+        <span>Einkommen ändern</span>
+        <span class="stress-val" id="st-income-val"><strong>{{ '+' if income_pct > 0 else '' }}{{ income_pct }} %</strong> · {{ stress.new_income | chf }}/Mt</span>
+      </div>
+      <input type="range" id="st-income" name="income_pct" data-good="right" min="{{ i_min }}" max="{{ i_max }}" step="5" value="{{ income_pct }}"
+             class="stress-slider"
+             style="background:linear-gradient(90deg, var(--bg-sunken) 0 {{ i_lo }}%, {{ i_col }} {{ i_lo }}% {{ i_hi }}%, var(--bg-sunken) {{ i_hi }}% 100%)">
+      {# Ohne Währungskürzel an den Skalenenden: „CHF" stand hier dreimal in
+         einer Zeile, die dadurch bei 375px zweizeilig umbrach. Die Währung
+         nennt der Wert über dem Regler („… /Mt") schon. #}
+      <div class="stress-scale">
+        <span>{{ i_min }} % · {{ (base_income * (100 + i_min) / 100) | chf_kurz }}</span>
+        <span class="stress-scale-mid">Basis {{ base_income | chf_kurz }}</span>
+        <span>+{{ i_max }} % · {{ (base_income * (100 + i_max) / 100) | chf_kurz }}</span>
+      </div>
+    </div>
+
+    {# ----- Ausgaben-Slider: UMGEKEHRT — links (weniger) = grün/positiv, rechts (mehr) = rose ----- #}
+    {% set e_min = -50 %}{% set e_max = 100 %}
+    {% set e_zero = ((0 - e_min) / (e_max - e_min) * 100) | round(2) %}
+    {% set e_pos = ((expense_pct - e_min) / (e_max - e_min) * 100) | round(2) %}
+    {% set e_lo = [e_zero, e_pos] | min %}{% set e_hi = [e_zero, e_pos] | max %}
+    {% set e_col = 'var(--dusty-rose)' if expense_pct > 0 else ('var(--accent-tertiary)' if expense_pct < 0 else 'var(--border-emphasis)') %}
+    <div class="stress-field">
+      <div class="stress-label">
+        <span>Ausgaben ändern</span>
+        <span class="stress-val" id="st-expense-val"><strong>{{ '+' if expense_pct > 0 else '' }}{{ expense_pct }} %</strong> · {{ stress.new_expense | chf }}/Mt</span>
+      </div>
+      <input type="range" id="st-expense" name="expense_pct" data-good="left" min="{{ e_min }}" max="{{ e_max }}" step="5" value="{{ expense_pct }}"
+             class="stress-slider"
+             style="background:linear-gradient(90deg, var(--bg-sunken) 0 {{ e_lo }}%, {{ e_col }} {{ e_lo }}% {{ e_hi }}%, var(--bg-sunken) {{ e_hi }}% 100%)">
+      <div class="stress-scale">
+        <span>{{ e_min }} % · {{ (base_expense * (100 + e_min) / 100) | chf_kurz }}</span>
+        <span class="stress-scale-mid">Basis {{ base_expense | chf_kurz }}</span>
+        <span>+{{ e_max }} % · {{ (base_expense * (100 + e_max) / 100) | chf_kurz }}</span>
+      </div>
+    </div>
+
+    <div class="stress-field">
+      <label for="st-onetime">Einmalige Sonderausgabe (CHF)</label>
+      <input id="st-onetime" type="number" name="one_time" min="0" step="100"
+             value="{{ '%.0f'|format(one_time) }}" class="full-w" style="max-width:240px">
+    </div>
+  </div>
+
+  {# ----------  Ergebnis (Werte werden vom Slider live aktualisiert)  ---------- #}
+  <div class="budget-summary" style="margin-top:18px">
+    <div class="bs-cell">
+      <div class="metric-label">Monatssaldo vorher</div>
+      <div class="metric-value" id="st-base-saldo" style="color:{{ 'var(--accent-tertiary)' if stress.base_saldo >= 0 else 'var(--danger)' }}">{{ stress.base_saldo | chf }}</div>
+    </div>
+    <div class="bs-cell">
+      <div class="metric-label">Monatssaldo im Szenario</div>
+      <div class="metric-value" id="st-new-saldo" style="color:{{ 'var(--accent-tertiary)' if stress.new_saldo >= 0 else 'var(--danger)' }}">{{ stress.new_saldo | chf }}</div>
+      <div class="metric-note" id="st-saldo-note">{{ stress.new_income | chf }} − {{ stress.new_expense | chf }}</div>
+      <div class="stress-delta" id="st-delta"></div>
+    </div>
+    <div class="bs-cell">
+      <div class="metric-label">Reichweite</div>
+      {% if stress.runway_months is none %}
+        <div class="metric-value" id="st-runway" style="color:var(--accent-tertiary)">unbegrenzt</div>
+        <div class="metric-note" id="st-runway-note">Saldo bleibt positiv</div>
+      {% else %}
+        <div class="metric-value" id="st-runway" style="color:{{ 'var(--danger)' if stress.runway_months < 12 else 'var(--text-primary)' }}">{{ stress.runway_months }} Mt</div>
+        {# Dieser Satz steht ein zweites Mal in app.js (setText("st-runway-note"),
+           beim Regler-Update). Kürzen liesse er sich nur an BEIDEN Stellen —
+           sonst holt der erste Reglerzug den alten Wortlaut zurück. app.js
+           gehört nicht zu dieser Sitzung, darum bleibt er unverändert. #}
+        <div class="metric-note" id="st-runway-note">so lange decken die liquiden Mittel den Verlust</div>
+      {% endif %}
+    </div>
+  </div>
+  <div id="st-warn">
+    {% if stress.runway_months is not none and stress.runway_months < 6 %}
+      <div class="feedback err" style="margin-top:12px">
+        ⚠ In diesem Szenario wären die liquiden Mittel in unter 6 Monaten aufgebraucht.
+      </div>
+    {% endif %}
+  </div>
+</div>

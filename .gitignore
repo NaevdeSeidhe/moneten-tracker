@@ -1,0 +1,35 @@
+# Konfiguration mit echten Werten. Gehört NIE ins Repository.
+.env
+
+# Daten: Datenbank, Belege, Sicherungen, eigene Anbieterprofile.
+data/
+_devdata/
+_backups/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Schlüssel und Zertifikate
+*.pem
+*.key
+*.pfx
+secret_key
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Werkzeuge und Betriebssystem
+.idea/
+.vscode/
+.DS_Store
+desktop.ini
+Thumbs.db

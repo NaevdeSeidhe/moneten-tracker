@@ -1,0 +1,32 @@
+{% extends "_shell.html" %}
+{% block title %}Scan-Protokoll{% endblock %}
+{% block content %}
+<h1>Scan-Protokoll</h1>
+
+{# Kein erklaerender Absatz: wer hier ist, sucht einen Fehler und weiss warum.
+   Die eine Angabe, die nicht auf der Hand liegt, steht in der Fusszeile. #}
+{% if not eintraege %}
+  <div class="card"><div class="muted">Noch kein Beleg gescannt.</div></div>
+{% else %}
+  {% for e in eintraege %}
+    <div class="card mb-4">
+      <div class="flex items-center justify-between">
+        <strong>{{ e.haendler or "—" }}</strong>
+        <span class="mono">{{ e.betrag | chf if e.betrag is not none else "—" }}</span>
+      </div>
+      <div class="muted text-sm">
+        {{ e.created_at.strftime("%d.%m.%Y, %H:%M") }} ·
+        {{ e.positionen }} Position{{ "en" if e.positionen != 1 }} ·
+        {{ {"ocr": "Foto erkannt", "text-layer": "Textebene", "none": "nichts gelesen"}.get(e.methode, e.methode) }}
+      </div>
+      {% if e.ocr_text %}
+        <details class="kz-roh">
+          <summary>Rohtext ({{ e.ocr_text | length }} Zeichen)</summary>
+          <pre>{{ e.ocr_text }}</pre>
+        </details>
+      {% endif %}
+    </div>
+  {% endfor %}
+  <div class="muted text-sm">Die letzten {{ grenze }} Scans; ältere fallen weg.</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,148 @@
+{% extends "_shell.html" %}
+{% block title %}Schnell erfassen — Moneten-Tracker{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div>
+    <h1 class="hero-greeting">Schnell erfassen</h1>
+  </div>
+</div>
+
+{% if flash %}<div class="banner-ok" style="margin-bottom:14px">{{ flash }}</div>{% endif %}
+{% if error %}<div class="feedback err" style="margin-bottom:14px">{{ error }}</div>{% endif %}
+
+{# Zentriert + auf Widescreen zweispaltig (Formular | Status/Verlauf), damit die
+   Felder nicht über die ganze Breite gezogen werden. #}
+<div class="quick-wrap">
+  {# Mobiler Beleg-Scan: Foto wählen/aufnehmen → OCR im Speicher → editierbare
+     digitale Quittung (#kz-modal). Das Foto wird nicht gespeichert. #}
+  <label class="kz-upload" tabindex="0">
+    {{ icon('receipt') }} <span>Beleg fotografieren / hochladen</span>
+    {# Upload via app.js (initReceiptPhotoInputs): verkleinert das Foto VOR dem Upload.
+       Ohne capture-Attribut: Handy bietet Kamera UND Galerie an (wie der FAB). #}
+    <input type="file" name="photo" accept="image/*" hidden class="js-receipt-photo">
+  </label>
+
+  <div class="quick-grid">
+
+    {# ----------  Erfassungs-Formular (Hauptspalte)  ---------- #}
+    {# quick-form-card entfällt: die Klasse trug nur den Fussabstand für den
+       schwebenden „Buchen"-Balken. Den Platz reserviert jetzt --dock-h an der
+       .app-shell, sonst wäre er zweimal da. #}
+    <div class="card">
+      {# fv = zuletzt eingetippte Rohwerte, nach einem Validierungsfehler gefüllt.
+         Ohne sie stand hier eine leere Maske, obwohl nur ein Feld falsch war. #}
+      {% set fv = form_values or {} %}
+      <form action="/quick" method="post" id="quick-form">
+        <div class="seg" style="margin-bottom:14px">
+          <label class="seg-opt"><input type="radio" name="kind" value="ausgabe" {% if fv.get('kind', 'ausgabe') == 'ausgabe' %}checked{% endif %}><span>Ausgabe</span></label>
+          <label class="seg-opt"><input type="radio" name="kind" value="einnahme" {% if fv.get('kind') == 'einnahme' %}checked{% endif %}><span>Einnahme</span></label>
+        </div>
+
+        <input id="quick-amount" name="amount" class="quick-amount full-w" inputmode="decimal" required
+               value="{{ fv.get('amount', '') }}"
+               autocomplete="off" placeholder="0.00" autofocus>
+
+        {# Häufige Kombinationen: deine meistgenutzten Kategorien (setzen Kategorie
+           UND Konto in einem Tap) — als Abkürzung zur Vollauswahl darunter. #}
+        {% if pills %}
+          <div class="label-cap" style="font-size:12px;margin:14px 0 6px;color:var(--text-tertiary)">Häufig</div>
+          <div class="quick-pills">
+            {% for p in pills %}
+              <button type="button" class="quick-pill" data-cat="{{ p.category_id }}" data-acc="{{ p.account_id }}">
+                {{ icon(p.icon) }} {{ p.category_name }}
+              </button>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        {# Kategorie als immer sichtbares, gruppiertes Pillen-Grid (kein Dropdown). #}
+        <input type="hidden" name="category_id" id="quick-cat" value="{{ fv.get('category_id', '') }}">
+        <div class="flex items-center justify-between" style="margin:16px 0 8px;gap:10px;flex-wrap:wrap">
+          <div class="label-cap" style="font-size:13px">Kategorie</div>
+          <input type="search" id="quick-catsearch" class="quick-catsearch" autocomplete="off"
+                 placeholder="Kategorie suchen…" aria-label="Kategorie suchen">
+        </div>
+        {# Das volle Raster liegt hinter einem Aufklapper: die häufigen Kategorien
+           darüber decken den Alltag ab und standen sonst doppelt auf demselben
+           Screen. Ohne Aufklapper war das Raster entweder ein Scroll-Kasten in
+           der scrollbaren Seite (Bedienfalle) oder gut 2000px lang. Die Suche
+           öffnet es automatisch, siehe initQuickCatSearch in app.js. #}
+        <details class="quick-catmore" id="quick-catmore">
+          <summary class="quick-catmore-head">Alle Kategorien</summary>
+          <div class="quick-catgrid" id="quick-catgrid">
+            <button type="button" class="cat-pill" data-cat="">— keine —</button>
+            {% for group_name, subs in category_groups %}
+              <div class="cat-picker-group">{{ group_name }}</div>
+              <div class="cat-pill-row">
+                {% for sub_id, sub_name, sub_icon in subs %}
+                  <button type="button" class="cat-pill" data-cat="{{ sub_id }}">{{ icon(sub_icon) }} {{ sub_name }}</button>
+                {% endfor %}
+              </div>
+            {% endfor %}
+          </div>
+        </details>
+
+        <div class="quick-foot">
+          <div>
+            <label for="quick-acc">Konto</label>
+            <select id="quick-acc" name="account_id" class="full-w" required>
+              {% for acc in accounts %}
+                <option value="{{ acc.id }}" {% if (fv.get('account_id')|string == acc.id|string) or (not fv.get('account_id') and acc.id == default_account_id) %}selected{% endif %}>{{ acc.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="quick-desc">Notiz (optional)</label>
+            <input id="quick-desc" name="description" class="full-w" value="{{ fv.get('description', '') }}" placeholder="z.B. Kaffee Bahnhof">
+          </div>
+        </div>
+
+        {# Klebt am unteren Rand, statt am Ende eines ~900px hohen Formulars zu
+           warten: die Kategorie-Wahl ist der lange Teil, und danach soll man
+           buchen können, ohne wieder ganz nach unten zu scrollen. #}
+        <div class="quick-submit">
+          <button type="submit" class="btn btn-primary full-w">Buchen</button>
+        </div>
+      </form>
+    </div>
+
+    {# ----------  Status + letzte Buchungen (Seitenspalte)  ---------- #}
+    <div class="flex-col gap-4">
+      <div class="card">
+        <div class="metric-label">Heute ausgegeben</div>
+        <div class="metric-value" style="color:var(--dusty-rose)">{{ status.today_spent | chf }}</div>
+        <div style="margin-top:14px">
+          <div class="metric-label">Budget-Rest (Monat)</div>
+          {% if status.rest_month is not none %}
+            <div class="metric-value" style="color:{{ 'var(--accent-tertiary)' if status.rest_month >= 0 else 'var(--danger)' }}">{{ status.rest_month | chf }}</div>
+          {% else %}
+            <div class="metric-value muted">—</div>
+            <div class="metric-note">kein Monatsbudget gesetzt</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="label-cap" style="margin-bottom:12px">Letzte Buchungen</div>
+        {% if recent %}
+          {% for tx in recent %}
+            <div class="row">
+              <span class="flex items-center gap-2" style="min-width:0">
+                <span class="muted mono text-sm">{{ tx.date.strftime('%d.%m.') }}</span>
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ tx.description or "(ohne Beschreibung)" }}</span>
+              </span>
+              <span class="mono" style="white-space:nowrap;color:{{ 'var(--accent-tertiary)' if tx.amount >= 0 else 'var(--text-primary)' }}">
+                {{ '+' if tx.amount >= 0 else '−' }} {{ tx.amount.copy_abs() | chf }}
+              </span>
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="muted text-sm" style="padding:8px 0">Noch keine Buchungen.</div>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

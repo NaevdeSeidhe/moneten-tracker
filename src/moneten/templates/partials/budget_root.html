@@ -1,0 +1,283 @@
+{# Inhalt von #budget-root: Monatsnavigation, Leitzahl „Verbleibend", Allokation,
+   zuklappbare Kategorie-Gruppen mit Soll-Editor und Rückstellungen.
+
+   Mobile-Prinzip (Phase 2): EINE Leitzahl pro Screen, alles Weitere hierarchisch
+   darunter. Gruppen starten zugeklappt — offen ist nur, was Aufmerksamkeit
+   braucht (überzogen oder ≥80% verbraucht, siehe `grp.open` im Router).
+   Kategorien ohne Soll und ohne Ausgabe stehen hinter „weitere", statt den
+   Screen mit CHF 0.00 und leeren Eingabefeldern zu füllen. #}
+
+{% from "partials/split_bar.html" import split_bar %}
+
+{# ----------  Eine Editor-Zeile: Name, Ist, Soll-Eingabe, Fortschritt  ---------- #}
+{% macro budget_row(r, month) %}
+  <div class="budget-row">
+    <div class="brow">
+      <span class="budget-cat">
+        {{ icon(r.cat.icon) }}<span class="brow-name">{{ r.cat.name }}</span>
+        {% if r.is_yearly %}<span class="badge-year" title="Jährliche Rückstellung: {{ r.annual | chf }}/Jahr">↻ Jahr</span>{% endif %}
+        {% if r.has_override %}<span class="badge-ovr" title="Für diesen Monat abweichend: {{ r.override | chf }}">Monat</span>{% endif %}
+      </span>
+      <span class="brow-vals">
+        <span class="brow-ist mono" title="Ausgegeben">{{ r.ist | chf_kurz }}</span>
+        {# Median-Vorschlag als antippbarer Chip statt nur als Platzhalter: der
+           Wert stand zwar da, musste aber von Hand abgetippt werden. Ein Tipp
+           übernimmt ihn (monatlich — das Intervall lässt sich danach umstellen). #}
+        {% if r.median is not none and not r.std_amount and r.median > 0 %}
+          <button type="button" class="soll-median" title="Vorschlag aus Median (6 Mt) übernehmen: {{ r.median | chf }}"
+                  hx-post="/budget/standard" hx-target="#budget-root" hx-swap="innerHTML"
+                  hx-vals='{"category_id": "{{ r.cat.id }}", "month": "{{ month }}", "amount": "{{ '%.0f'|format(r.median) }}", "interval": "monatlich"}'>⌀{{ '%.0f'|format(r.median) }}</button>
+        {% endif %}
+        {% if r.edit_override %}
+          {# Monats-Override: gilt NUR für diesen Monat und schlägt den Standard.
+             Bewusst als aufklappbarer Editor je Zeile statt als zweites
+             Dauer-Eingabefeld — sonst stünden zwei Beträge nebeneinander, deren
+             Unterschied man raten müsste. #}
+          <span class="soll-edit ovr-edit">
+            <input class="soll-input" name="soll" inputmode="decimal" autofocus
+                   aria-label="Nur {{ month_label }}: Soll für {{ r.cat.name }}"
+                   value="{{ '%.0f'|format(r.override) if r.override else '' }}"
+                   placeholder="{{ '%.0f'|format(r.eff) if r.eff else 'Betrag' }}"
+                   hx-post="/budget/set" hx-trigger="change" hx-target="#budget-root" hx-swap="innerHTML"
+                   hx-vals='{"category_id": "{{ r.cat.id }}", "month": "{{ month }}"}'>
+            {% if r.has_override %}
+              <button type="button" class="btn btn-ghost text-sm" title="Override entfernen — wieder der Standard-Soll"
+                      hx-post="/budget/set" hx-target="#budget-root" hx-swap="innerHTML"
+                      hx-vals='{"category_id": "{{ r.cat.id }}", "month": "{{ month }}", "soll": "0"}'>zurücksetzen</button>
+            {% endif %}
+            <button type="button" class="btn btn-ghost text-sm" title="Abbrechen"
+                    hx-get="/budget?month={{ month }}" hx-target="#budget-root" hx-swap="innerHTML">✕</button>
+          </span>
+        {% else %}
+        <span class="soll-edit">
+          {# Nur-für-diesen-Monat: selten gebraucht, darum ein schmaler Knopf
+             statt eines zweiten Dauer-Eingabefelds pro Zeile. #}
+          <button type="button" class="ovr-open{% if r.has_override %} on{% endif %}"
+                  title="Nur für {{ month_label }} abweichend setzen"
+                  aria-label="Monats-Override für {{ r.cat.name }}"
+                  hx-get="/budget?month={{ month }}&ovr={{ r.cat.id }}"
+                  hx-target="#budget-root" hx-swap="innerHTML">{{ icon('calendar') }}</button>
+          <input class="soll-input" name="amount" inputmode="decimal" aria-label="Soll für {{ r.cat.name }}"
+                 value="{{ '%.0f'|format(r.std_amount) if r.std_amount else '' }}"
+                 placeholder="Soll"
+                 title="{% if r.median is not none %}Vorschlag aus Median (6 Mt): {{ r.median | chf }}{% else %}Soll-Betrag{% endif %}"
+                 hx-post="/budget/standard" hx-trigger="change" hx-target="#budget-root" hx-swap="innerHTML"
+                 hx-include="closest .soll-edit"
+                 hx-vals='{"category_id": "{{ r.cat.id }}", "month": "{{ month }}"}'>
+          {# Intervall-Wahl erst, wenn ein Betrag existiert: für leere Kategorien
+             ist sie sinnlos und kostete allein auf dieser Seite 40+ Bedienelemente.
+             Neu eingetippte Beträge sind monatlich (Default im Endpoint) — danach
+             erscheint die Auswahl und lässt sich auf /Jahr stellen. #}
+          {% if r.std_amount %}
+            <select class="interval-select" name="interval" aria-label="Intervall für {{ r.cat.name }}"
+                    hx-post="/budget/standard" hx-trigger="change" hx-target="#budget-root" hx-swap="innerHTML"
+                    hx-include="closest .soll-edit"
+                    hx-vals='{"category_id": "{{ r.cat.id }}", "month": "{{ month }}"}'>
+              <option value="monatlich" {{ 'selected' if r.interval == 'monatlich' else '' }}>/Mt</option>
+              <option value="jaehrlich" {{ 'selected' if r.interval == 'jaehrlich' else '' }}>/Jahr</option>
+            </select>
+          {% endif %}
+        </span>
+        {% endif %}
+      </span>
+    </div>
+    {% if r.eff %}
+      <span class="bar brow-bar" title="{{ r.ist | chf }} von {{ r.eff | chf }}">
+        <span class="ampel-{{ r.ampel }}" style="width:{{ r.pct }}%"></span>
+      </span>
+    {% endif %}
+  </div>
+{% endmacro %}
+
+{# ----------  Eine Gruppen-Karte  ----------
+   Zugeklappt muss der Kopf allein tragen. MIT Soll: Rest + Ampelbalken. OHNE
+   Soll gibt es keinen Füllstand — dann trägt der Balken den Anteil dieser Gruppe
+   an den Monatsausgaben, in der Farbe, die die Gruppe auch im Allokationsbalken
+   hat. Vorher stand hier ein Balken auf 0 %, also eine leere Rille. #}
+{% macro budget_group(grp, month) %}
+  <details class="card bgrp" {{ 'open' if grp.open else '' }}>
+    <summary class="bgrp-head">
+      <span class="bgrp-title">{{ icon(grp.top.icon, "cat-icon lg") }}<span>{{ grp.top.name }}</span></span>
+      {# Ohne gesetztes Soll wäre „Rest" = minus Ist — das läse sich als
+         Budgetüberschreitung, obwohl nie ein Budget existierte. Dann zeigt der
+         Kopf schlicht das Ausgegebene. #}
+      <span class="bgrp-vals">
+        {% if grp.soll > 0 %}
+          <span class="bgrp-rest mono" style="color:{{ 'var(--danger)' if grp.over else 'var(--text-primary)' }}">{{ grp.rest | chf_kurz }}</span>
+          <span class="bgrp-sub mono">{{ grp.ist | chf_kurz }} von {{ grp.soll | chf_kurz }}</span>
+        {% else %}
+          {# Hier stand „kein Budget" — zugeklappt aber ausgeblendet durch
+             .bgrp:not([open]) .bgrp-sub, also genau im einzigen Zustand, in dem
+             die Karte sonst nichts sagt. Eigene Klasse, damit die Regel sie nicht
+             mehr trifft, und „Soll" statt „Budget", weil das Eingabefeld darunter
+             so heisst. Zwei Wörter, weil die Spalte dem Gruppennamen Breite
+             wegnimmt: „kein Soll gesetzt" schnitt „Versicherungen & Abgaben" ab.
+             Ohne Ausgabe entfällt der Hinweis ganz — diese Gruppen stehen ohnehin
+             hinter „ohne Soll und ohne Ausgaben". #}
+          <span class="bgrp-rest mono">{{ grp.ist | chf_kurz }}</span>
+          {% if grp.ist > 0 %}<span class="bgrp-nosoll">kein Soll</span>{% endif %}
+        {% endif %}
+      </span>
+      {% if grp.soll > 0 %}
+        <span class="bar bgrp-bar" title="{{ grp.ist | chf }} von {{ grp.soll | chf }}">
+          <span class="ampel-{{ grp.ampel }}" style="width:{{ grp.pct }}%"></span>
+        </span>
+      {% elif grp.ist > 0 %}
+        {# Anteil an den Monatsausgaben statt Füllstand. Unter 0.5 % rundet der
+           Prozentwert auf 0 — dann stünde hier wieder ein Balken auf 0 %, also
+           genau die leere Rille. Ausgegeben WURDE etwas, also mindestens 1 %
+           Breite und „<1 %" als Beschriftung. #}
+        <span class="bgrp-anteil">
+          <span class="bar bgrp-bar bgrp-anteil-bar">
+            <span style="width:{{ [grp.anteil, 1] | max }}%; background:{{ grp.farbe }}"></span>
+          </span>
+          <span class="bgrp-anteil-pct mono">{{ '<1' if grp.anteil < 1 else grp.anteil }}% der Ausgaben</span>
+        </span>
+      {% endif %}
+    </summary>
+
+    <div class="bgrp-body">
+      {% for r in grp.active %}{{ budget_row(r, month) }}{% endfor %}
+
+      {% if grp.idle %}
+        <details class="disclosure bgrp-idle">
+          {# Gleiche Formulierung wie beim Aufklapper der ganzen Gruppen: es ist
+             derselbe Fall, eine Ebene tiefer. #}
+          <summary>{{ grp.idle | length }} ohne Soll und ohne Ausgaben</summary>
+          {% for r in grp.idle %}{{ budget_row(r, month) }}{% endfor %}
+        </details>
+      {% endif %}
+    </div>
+  </details>
+{% endmacro %}
+
+{% if info %}<div class="banner-ok" style="margin-bottom:14px">✓ {{ info }}</div>{% endif %}
+
+{# ----------  Monatsnavigation (+ kompakter „Soll aus Median"-Button rechts)  ---------- #}
+<div class="month-nav mb-4">
+  <button class="btn btn-ghost" hx-get="/budget?month={{ prev_month }}" hx-target="#budget-root" hx-swap="innerHTML" aria-label="Vormonat">←</button>
+  <span class="month-nav-label">{{ month_label }}</span>
+  <button class="btn btn-ghost" hx-get="/budget?month={{ next_month }}" hx-target="#budget-root" hx-swap="innerHTML" aria-label="Folgemonat">→</button>
+  {# Leere Standard-Soll-Werte automatisch aus dem Median füllen — kein eigener Karten-Block mehr. #}
+  <form class="month-nav-action" hx-post="/budget/autofill" hx-target="#budget-root" hx-swap="innerHTML"
+        hx-vals='{"month": "{{ month }}"}'
+        hx-confirm="Leere Standard-Soll-Werte aus dem Median der bisherigen Ausgaben füllen?">
+    <button type="submit" class="btn btn-ghost text-sm" title="Leere Soll-Werte aus dem Median füllen">{{ icon('bolt') }} Soll füllen</button>
+  </form>
+</div>
+
+{# ----------  Leitzahl: was ist diesen Monat noch frei  ---------- #}
+{% if totals.kein_soll %}
+  {# Ohne ein einziges Soll ist „Rest" der negative Ist-Betrag: die Leitzahl
+     meldete rot „Über Budget", obwohl nie ein Budget existierte. Dann bleibt
+     als Aussage nur das Ausgegebene — Balken und „x von 0" entfallen. #}
+  <div class="card mb-4 budget-hero">
+    <div class="metric-label">Ausgegeben in {{ month_label }}</div>
+    <div class="budget-hero-num" data-countup="{{ totals.ist }}">{{ totals.ist | chf }}</div>
+  </div>
+{% else %}
+<div class="card mb-4 budget-hero">
+  <div class="metric-label">{{ "Über Budget" if totals.rest < 0 else "Noch frei" }}</div>
+  <div class="budget-hero-num" data-countup="{{ totals.rest }}"
+       style="color:{{ 'var(--danger)' if totals.rest < 0 else 'var(--text-primary)' }}">{{ totals.rest | chf }}</div>
+  <div class="bar bar-lg">
+    <span class="ampel-{{ 'over' if totals.over else ('warn' if totals.pct >= 80 else 'ok') }}" style="width:{{ totals.pct }}%"></span>
+  </div>
+  <div class="budget-hero-foot">
+    <span>{{ totals.ist | chf }} von <span title="inkl. 1/12 der Jahreskosten">{{ totals.soll | chf }}</span></span>
+    <span class="mono">{{ totals.pct }}%</span>
+  </div>
+</div>
+{% endif %}
+
+{# ----------  Was von der Leitzahl schon vergeben ist  ----------
+   Die Zahl oben verliert diesen Betrag ohnehin, sobald die Buchungen kommen —
+   hier steht er vorher da statt als Überraschung am Zahltag. #}
+{# Ohne Soll gibt es keine Luft, von der etwas abgehen könnte: „= wirklich frei"
+   wäre dann der negative Ist-Betrag minus der Fixabgänge. #}
+{% if totals.offene_posten and not totals.kein_soll %}
+<details class="card mb-4 sunken vergeben">
+  <summary class="vergeben-head">
+    <span class="label-cap">Davon schon vergeben</span>
+    <span class="mono vergeben-abzug">− {{ totals.vergeben | chf }}</span>
+    {# Nur Zahl + Etikett: „stehen noch aus" sagte nichts, was „Davon schon
+       vergeben" zwei Zeilen darüber nicht schon sagt, brach aber bei 375px in
+       eine zweite Zeile und schob die Summe rechts nach unten. #}
+    <span class="muted text-sm">{% set n = totals.offene_posten | length %}{{ n }} Fixabg{{ 'änge' if n != 1 else 'ang' }}</span>
+    <strong class="mono vergeben-rest" style="color:{{ 'var(--danger)' if totals.wirklich_frei < 0 else 'var(--text-primary)' }}">= {{ totals.wirklich_frei | chf }}</strong>
+  </summary>
+  <div class="vergeben-list">
+    {% for p in totals.offene_posten %}
+      <div class="row">
+        <span>{{ p.name }}{% if p.tag %} <span class="muted text-sm">meist am {{ p.tag }}.</span>{% endif %}</span>
+        <span class="mono">{{ p.betrag | chf }}</span>
+      </div>
+    {% endfor %}
+    {# Rechenregel statt Dauertext: wer sie einmal gelesen hat, braucht sie nie
+       wieder — sie stand aber unter jeder Aufstellung und kostete auf 375px
+       drei Zeilen. Hinter dem Aufklapper bleibt sie erreichbar. #}
+    <details class="disclosure">
+      <summary class="text-sm">Wie gerechnet wird</summary>
+      <p class="muted text-sm" style="margin:8px 0 0">
+        Jahresbeträge zählen mit einem Zwölftel — gleich wie im Soll oben. Bereits gebuchte
+        Zahlungen fehlen hier, die stecken schon im Ist.
+      </p>
+    </details>
+  </div>
+</details>
+{% endif %}
+
+{# ----------  Allokation: wohin geht das Budget  ---------- #}
+{% if alloc %}
+<div class="card mb-4">
+  <div class="label-cap card-head">Wohin dein Budget fliesst</div>
+  {# Abgerundeter Aufteilungs-Balken mit Icon je Kategorie + Farb-Legende. #}
+  {{ split_bar(alloc, height=38, legend=true) }}
+</div>
+{% endif %}
+
+{# ----------  Kategorie-Gruppen mit Standard-Soll-Editor  ----------
+   Die Überschrift beantwortet eine Frage, die der Nutzer sonst stellt: warum
+   Versicherungen hier stehen, erkannte Abos aber nicht. Das Soll SETZT er hier;
+   Abos ERKENNT die Abo-Seite aus den Buchungen. Darum die zwei Wörter und der
+   Weg dorthin. #}
+<div class="bgrp-listenkopf">
+  <span class="label-cap">Selbst gesetztes Soll</span>
+  <a class="bgrp-abolink" href="/subscriptions">Erkannte Abos →</a>
+</div>
+
+<div class="budget-groups">
+  {% for grp in groups %}{{ budget_group(grp, month) }}{% endfor %}
+
+  {# Weder Soll noch Ausgabe: die Karte hätte nichts als ihren Namen gezeigt. #}
+  {% if leere_gruppen %}
+    <details class="disclosure bgrp-leer">
+      <summary>{{ leere_gruppen | length }} ohne Soll und ohne Ausgaben</summary>
+      {% for grp in leere_gruppen %}{{ budget_group(grp, month) }}{% endfor %}
+    </details>
+  {% endif %}
+</div>
+
+{# ----------  Rückstellungen: jährliche Kosten  ---------- #}
+{% if rueckstellungen %}
+<details class="card mt-4 bgrp">
+  <summary class="bgrp-head">
+    <span class="bgrp-title">{{ icon('repeat', "cat-icon lg") }}<span>Rückstellungen</span></span>
+    <span class="bgrp-vals">
+      <span class="bgrp-rest mono">{{ rueck_monthly | chf_kurz }}</span>
+      <span class="bgrp-sub mono">pro Monat · {{ rueck_annual | chf_kurz }}/Jahr</span>
+    </span>
+  </summary>
+  <div class="bgrp-body data-cols">
+    {% for r in rueckstellungen %}
+      <div class="row">
+        <span class="flex items-center gap-2">{{ r.cat.name }} <span class="muted text-sm">· {{ r.top }}</span></span>
+        <span class="flex items-center gap-3">
+          <span class="mono muted text-sm">{{ r.monthly | chf_kurz }}/Mt</span>
+          <span class="mono">{{ r.annual | chf_kurz }}/Jahr</span>
+        </span>
+      </div>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}

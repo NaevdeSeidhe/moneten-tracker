@@ -1,0 +1,31 @@
+{# Positionen eines geprüften Rechnungsbelegs an EINER Buchungszeile.
+
+   Erwartet ``posten`` = Liste von services.rechnungsbeleg.Posten. Eingebunden
+   aus tx_months.html, als Gitterfeld „posten" der Zeile (die Zeile trägt dann
+   .hat-posten).
+
+   Gestalt wie die Kappungs-Aufstellung im Verlaufsdiagramm: Name links, Betrag
+   rechts, eine Zeile je Posten. Rabatte behalten ihr negatives Vorzeichen — als
+   Höhe geschrieben wären sie von einem Abonnement nicht mehr zu unterscheiden.
+
+   ZUGEKLAPPT wie der Lohnblock: eine Rechnung führt ein Dutzend Positionen, und
+   die Buchungsliste ist eine Liste von Buchungen. Der Kopf trägt die Anzahl,
+   damit er nicht nur ein Knopf ist, sondern schon eine Auskunft.
+
+   Kein Summenzeile: der Rechnungsbetrag steht als gebuchter Betrag in derselben
+   Zeile darüber. Ein zweites Mal hingeschrieben wäre er die gleiche Zahl
+   untereinander. #}
+<details class="bposten">
+  <summary class="bposten-kopf">
+    <span class="bposten-titel">Positionen</span>
+    <span class="bposten-zahl">{{ posten | length }}</span>
+  </summary>
+  <div class="bposten-blatt">
+    {% for p in posten %}
+      <div class="bposten-zeile">
+        <span class="bposten-was">{{ p.name }}</span>
+        <span class="bposten-betrag">{{ p.betrag | chf_wert }}</span>
+      </div>
+    {% endfor %}
+  </div>
+</details>

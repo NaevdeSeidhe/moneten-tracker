@@ -1,0 +1,63 @@
+{% extends "_shell.html" %}
+{% block title %}Quittungen zuordnen — Moneten-Tracker{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div>
+    <h1 class="hero-greeting">Quittungen zuordnen</h1>
+  </div>
+  {# Kurze Sprungziele: „Archiv ansehen" und „zurück zum Import" sagten mit
+     drei Wörtern, was ein Wort sagt — die drei Knöpfe brauchten dadurch bei
+     375px zwei Zeilen, bevor die erste Quittung überhaupt anfing. #}
+  <div class="hero-aside" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <a class="btn btn-ghost" href="/import/receipts/log">Diagnose-Log</a>
+    <a class="btn btn-ghost" href="/import/receipts/archived">{{ icon('archive') }} Archiv</a>
+    <a class="btn btn-ghost" href="/import">← Import</a>
+  </div>
+</div>
+
+{% if not has_folder %}
+  <div class="feedback err">
+    Kein Quittungs-Ordner konfiguriert. Setze <span class="mono">MONETEN_RECEIPTS_DIR</span> in der <span class="mono">.env</span>.
+  </div>
+{% elif not rows %}
+  <div class="card">
+    <div class="banner-ok">✓ Alles zugeordnet</div>
+  </div>
+{% else %}
+  <div class="flex items-center justify-between mb-4" style="gap:12px;flex-wrap:wrap">
+    {# Zahl + Etikett: „im Ordner" ist der einzige Ort, aus dem diese Seite
+       liest, und „(en)" war eine Klammer, die die Vorlage selbst auflösen kann. #}
+    <div class="muted text-sm">
+      {{ total_unassigned }} Quittung{{ 'en' if total_unassigned != 1 }} unzugeordnet
+    </div>
+    <button type="button" class="btn btn-primary"
+            hx-post="/import/receipts/auto/begin" hx-target="#match-progress" hx-swap="outerHTML">
+      {{ icon('bolt') }} Automatisch zuordnen
+    </button>
+  </div>
+  {# Hierhin rendert der Fortschritts-Ring (runder Balken 0–100 %). #}
+  <div id="match-progress"></div>
+  <div class="flex items-center mb-4" style="gap:12px;flex-wrap:wrap">
+    <form hx-post="/import/receipts/archive-unmatchable" hx-target="#bulk-result" hx-swap="innerHTML"
+          hx-confirm="Alle Belege ohne mögliche Bankbuchung (Rechnung/Bargeld/Duplikat) archivieren? Die Dateien bleiben im Ordner.">
+      {# Die Klammer „(Rechnung/Bargeld/Duplikat)" definierte „un-matchbar" und
+         machte aus dem Knopf einen zweizeiligen Block. Sie steht unverändert im
+         hx-confirm darüber — also genau dann vor Augen, wenn es darauf ankommt. #}
+      <button type="submit" class="btn btn-ghost btn-sm">{{ icon('archive') }} Un-matchbare archivieren</button>
+    </form>
+  </div>
+  <div id="bulk-result" class="mb-4"></div>
+  {% if auto_archived %}
+    {# Der Nachsatz „die haben keinen Bankeintrag zum Zuordnen" wiederholte
+       „vor deinem ersten Bankeintrag" mit anderen Worten. #}
+    <div class="banner-ok mb-4">
+      {{ icon('archive') }} {{ auto_archived }} Beleg{{ 'e' if auto_archived != 1 }} vor dem ersten Bankeintrag{% if cutoff %} ({{ cutoff.strftime('%d.%m.%Y') }}){% endif %} archiviert
+    </div>
+  {% endif %}
+  {% for row in rows %}
+    {% set s = row.s %}{% set options = row.options %}{% set idx = loop.index %}
+    {% include "partials/receipt_card.html" %}
+  {% endfor %}
+{% endif %}
+{% endblock %}

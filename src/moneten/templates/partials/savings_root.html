@@ -1,0 +1,150 @@
+{# Inhalt von #savings-root: Treffen-Fonds, Summe, Formular für neues Ziel, Liste. #}
+{% from "partials/row_menu.html" import row_menu %}
+
+{% if error %}<div class="feedback err" style="margin-bottom:14px">{{ error }}</div>{% endif %}
+
+{# ----------  Treffen-Fonds  ---------- #}
+{% include "partials/meet_fund.html" %}
+
+{# ----------  Summe offener Ziele  ----------
+   Eine Leitzahl statt dreier gleichwertiger Kacheln: „noch zu sparen" ist die
+   Frage, die man an diese Seite hat. Gespart und Ziel stehen als Herleitung
+   darunter, dazu ein Fortschrittsbalken. #}
+{% set offen = total_target - total_saved %}
+{% set pct = ((total_saved / total_target * 100) | round | int) if total_target > 0 else 0 %}
+<div class="card mb-4">
+  <div class="metric-label">Noch zu sparen</div>
+  <div class="budget-hero-num" data-countup="{{ offen if offen > 0 else 0 }}"
+       style="color:{{ 'var(--accent-tertiary)' if offen <= 0 else 'var(--text-primary)' }}">{{ (offen if offen > 0 else 0) | chf }}</div>
+  <div class="bar bar-lg">
+    <span class="ampel-{{ 'ok' if pct >= 100 else ('warn' if pct >= 50 else 'none') }}"
+          style="width:{{ pct if pct < 100 else 100 }}%"></span>
+  </div>
+  <div class="budget-hero-foot">
+    <span>{{ total_saved | chf }} von {{ total_target | chf }}</span>
+    <span class="mono">{{ pct }}%</span>
+  </div>
+</div>
+
+<div class="grid-main">
+  {# ----------  Neues Sparziel  ----------
+     Zugeklappt: Sparziele legt man selten an, das Formular stand aber dauerhaft
+     über der Liste und schob sie auf dem Handy aus dem Bild. #}
+  <details class="card bgrp">
+    <summary class="bgrp-head">
+      <span class="bgrp-title">{{ icon('plus', "cat-icon lg") }}<span>Neues Sparziel</span></span>
+    </summary>
+    <form class="bgrp-body" hx-post="/savings-goals" hx-target="#savings-root" hx-swap="innerHTML">
+      <div class="grid-2" style="gap:14px">
+        <div style="grid-column:1 / -1">
+          <label for="sg-name">Name</label>
+          <input id="sg-name" name="name" class="full-w" placeholder="z.B. Notgroschen, Reise" required>
+        </div>
+        <div>
+          <label for="sg-target">Zielbetrag</label>
+          <input id="sg-target" name="target_amount" class="full-w" inputmode="decimal" required placeholder="z.B. 10000">
+        </div>
+        <div>
+          <label for="sg-date">Zieldatum (optional)</label>
+          <input id="sg-date" name="target_date" type="date" class="full-w">
+        </div>
+        <div>
+          <label for="sg-account">Fortschritt aus Konto (optional)</label>
+          <select id="sg-account" name="account_id" class="full-w">
+            <option value="">— kein Konto —</option>
+            {% for acc in accounts %}<option value="{{ acc.id }}">{{ acc.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="sg-prio">Priorität</label>
+          <select id="sg-prio" name="priority" class="full-w">
+            <option value="high">Hoch</option>
+            <option value="medium" selected>Mittel</option>
+            <option value="low">Niedrig</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex gap-2 mt-4"><button type="submit" class="btn btn-primary">Sparziel anlegen</button></div>
+    </form>
+  </details>
+
+  {# ----------  Liste der Ziele  ---------- #}
+  <div class="card">
+    <div class="label-cap card-head">Deine Sparziele ({{ rows | length }})</div>
+    {% if rows %}
+      {% for r in rows %}
+        <div class="budget-row" {% if r.g.is_achieved %}style="opacity:.6"{% endif %}>
+          <div class="flex items-center justify-between gap-3">
+            <span class="flex items-center gap-2" style="min-width:0">
+              {{ icon(r.g.icon or "target", "cat-icon lg") }}
+              <span style="min-width:0">
+                <span style="display:block">
+                  {{ r.g.name }}
+                  {% if r.g.is_achieved %}<span class="pill" style="color:var(--accent-tertiary)">✓ erreicht</span>{% endif %}
+                </span>
+                <span class="muted text-sm">
+                  Priorität {{ r.prio_label }}
+                  {% if r.account %} · {{ r.account.name }}{% endif %}
+                  {% if r.g.target_date %} · bis {{ r.g.target_date.strftime('%d.%m.%Y') }}{% endif %}
+                </span>
+              </span>
+            </span>
+            <span class="flex items-center gap-2" style="white-space:nowrap">
+              {# „Erreicht" direkt in der Zeile statt im ⋯-Menü: es ist die
+                 häufigste Aktion der Seite und war zwei Taps tief vergraben.
+                 Löschen bleibt im Menü — ein Fehlgriff wäre dort teuer. #}
+              <button type="button" class="btn btn-ghost text-sm sg-toggle{% if r.g.is_achieved %} on{% endif %}"
+                      hx-post="/savings-goals/{{ r.g.id }}/toggle" hx-target="#savings-root" hx-swap="innerHTML"
+                      title="{{ 'Wieder als offen markieren' if r.g.is_achieved else 'Als erreicht markieren' }}"
+                      aria-pressed="{{ 'true' if r.g.is_achieved else 'false' }}">{{ icon('check') }} <span class="sg-toggle-txt">{{ "Wieder offen" if r.g.is_achieved else "Erreicht" }}</span></button>
+              {% call row_menu() %}
+                <button type="button" class="rowmenu-item danger" role="menuitem"
+                        hx-post="/savings-goals/{{ r.g.id }}/delete" hx-target="#savings-root" hx-swap="innerHTML"
+                        hx-confirm="Sparziel „{{ r.g.name }}“ löschen?">{{ icon('trash') }} Löschen</button>
+              {% endcall %}
+            </span>
+          </div>
+
+          {% if r.pct is not none %}
+            <div class="bar" style="margin-top:10px">
+              <span class="ampel-ok" style="width:{{ r.pct }}%"></span>
+            </div>
+            {# Währung einmal je Zeile statt dreimal: „CHF 2'500.00 / CHF
+               4'000.00" und „noch CHF 1'500.00" brachen bei 375px beide um.
+               chf_wert behält die Rappen — nur das Kürzel fällt weg, und das
+               steht in derselben Zeile schon links. #}
+            <div class="flex items-center justify-between text-sm muted" style="margin-top:6px">
+              <span class="mono">{{ r.saved | chf }} / {{ r.g.target_amount | chf_wert }}</span>
+              <span>{{ r.pct }}% · noch {{ r.remaining | chf_wert }}</span>
+            </div>
+            {% if r.forecast %}
+              <div class="text-sm" style="margin-top:6px">
+                {% if r.forecast.stalled %}
+                  <span class="muted">Kein Sparfortschritt — keine Prognose.</span>
+                {% else %}
+                  📈 Voraussichtlich erreicht: <strong>{{ r.forecast.label }}</strong>
+                  <span class="muted">(≈ {{ r.forecast.rate | chf }}/Mt)</span>
+                  {% if r.g.target_date %}
+                    <span class="pill" style="color:{{ 'var(--accent-tertiary)' if r.forecast.on_track else 'var(--danger)' }}">
+                      {{ 'auf Kurs' if r.forecast.on_track else 'zu langsam fürs Zieldatum' }}
+                    </span>
+                  {% endif %}
+                {% endif %}
+              </div>
+            {% endif %}
+          {% else %}
+            {# Warum hier kein Balken steht, ist die Information — als Etikett
+               statt als Klammersatz: ohne Konto gibt es keinen Fortschritt. #}
+            <div class="text-sm muted" style="margin-top:8px">
+              Zielbetrag <span class="mono">{{ r.g.target_amount | chf }}</span> · kein Konto verknüpft
+            </div>
+          {% endif %}
+        </div>
+      {% endfor %}
+    {% else %}
+      {# „links" stimmte nur am breiten Schirm — am Handy steht das Formular
+         DARÜBER, und zwar sichtbar mit eigener Überschrift. #}
+      <div class="muted text-sm" style="padding:12px 0">Noch keine Sparziele.</div>
+    {% endif %}
+  </div>
+</div>

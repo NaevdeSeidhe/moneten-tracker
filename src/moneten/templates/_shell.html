@@ -1,0 +1,220 @@
+{# Gemeinsame App-Shell: Topbar mit Brand + Theme-Toggle, Tab-Navigation, Footer.
+   Header, Tabs, Content und Footer teilen denselben zentrierten .container,
+   damit alles auf derselben Achse fluchtet. #}
+{% extends "base.html" %}
+
+{% block body %}
+<div class="app-shell" data-lock-grace="{{ lock_grace }}">
+  {% include "partials/icon_sprite.html" %}
+
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="/" style="color:inherit">
+        <img class="brand-logo" src="/static/img/logo.png" alt="Moneten-Tracker Logo">
+        <span>
+          <span class="brand-title">Moneten-Tracker</span><br>
+          <span class="brand-sub">{{ heute_label() }}</span>
+        </span>
+      </a>
+
+      <div class="topbar-actions">
+        {# Globale Befehls-/Sprungsuche (Strg+K / ⌘+K). #}
+        <button type="button" class="icon-btn cmdk-open" title="Suche (Strg+K)" aria-label="Suche öffnen">{{ icon('search') }}</button>
+        {# Import + Einstellungen sind keine Menüpunkte mehr, sondern Icons hier oben. #}
+        <a class="icon-btn {% if active_tab == 'import_bank' %}on{% endif %}" href="/import"
+           title="Import" aria-label="Import">{{ icon('upload') }}</a>
+        <a class="icon-btn {% if active_tab == 'settings' %}on{% endif %}" href="/settings"
+           title="Einstellungen" aria-label="Einstellungen">{{ icon('settings') }}</a>
+        {# Theme-Umschalter: eine Achse, Einträge kommen aus moneten/themes.py.
+           data-bg/data-dark liefert app.js die Grundfarbe fuer den Sofort-Wechsel
+           (Hintergrund + PWA-Statusleiste) — ein neues Theme braucht kein JS. #}
+        <div class="theme-toggle" role="group" aria-label="Erscheinungsbild wählen">
+          {% for t in THEMES %}
+            <button type="button" data-theme-pick data-theme="{{ t.key }}" data-bg="{{ t.bg }}"
+                    data-dark="{{ 1 if t.dark else 0 }}" data-label="{{ t.label }}"
+                    title="{{ t.note }}" aria-pressed="false">{{ t.label }}</button>
+          {% endfor %}
+        </div>
+        <a class="btn btn-ghost" href="/logout">Abmelden</a>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <div class="container tabs-inner">
+      <a class="tab {% if active_tab == 'dashboard' %}active{% endif %}"        href="/">Übersicht</a>
+      <a class="tab {% if active_tab == 'transactions' %}active{% endif %}"    href="/transactions">Buchungen</a>
+      <a class="tab {% if active_tab == 'accounts' %}active{% endif %}"        href="/accounts">Konten</a>
+      <a class="tab {% if active_tab == 'budget' %}active{% endif %}"          href="/budget">Budget</a>
+      <a class="tab {% if active_tab == 'subscriptions' %}active{% endif %}"   href="/subscriptions">Abos</a>
+      <a class="tab {% if active_tab == 'savings_goals' %}active{% endif %}"   href="/savings-goals">Sparziele</a>
+      <a class="tab {% if active_tab == 'forecast' %}active{% endif %}"        href="/forecast">Prognose</a>
+      <a class="tab {% if active_tab == 'compare' %}active{% endif %}"         href="/compare">Vergleich</a>
+      <a class="tab {% if active_tab == 'tax' %}active{% endif %}"             href="/steuern">Steuern</a>
+      <a class="tab {% if active_tab == 'prices' %}active{% endif %}"          href="/preise">Preise</a>
+      <a class="tab {% if active_tab == 'metrics' %}active{% endif %}"         href="/verlaeufe">Verläufe</a>
+      <a class="tab {% if active_tab == 'rules' %}active{% endif %}"           href="/rules">Regeln</a>
+    </div>
+  </nav>
+
+  <main class="main">
+    <div class="container">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+
+  {# Footer: eine Zeile mit den einzig nützlichen (dynamischen) Infos — Version +
+     letzter Import. Navigation steckt in Tab-Leiste/Mehr-Sheet, Marketing braucht
+     der einzige Nutzer nicht. #}
+  <footer class="footer">
+    <div class="container">
+      {# „Import:" statt „Letzter Import:" — mit dem längeren Label passten die
+         beiden Angaben auf 375px nicht mehr nebeneinander und der Footer stapelte
+         sich zweizeilig auf 76px. #}
+      <div class="footer-bottom">
+        <span>Moneten-Tracker <span class="mono">{{ app_version or "0.1.1" }}</span></span>
+        <span>Import: <span class="muted">{{ letzter_import() }}</span></span>
+      </div>
+    </div>
+  </footer>
+
+  {# Schwebender Aktions-Button (rechts unten): Beleg fotografieren/hochladen →
+     OCR im Speicher → editierbare digitale Quittung (#kz-modal). Das Foto wird
+     nicht gespeichert (Einstellungen → Belege). BEWUSST ohne capture-Attribut:
+     so bietet das Handy Kamera UND Galerie an — mit capture wäre das Hochladen
+     bereits vorhandener Fotos unmöglich (Widerspruch zur Beschriftung). #}
+  {# Suche als zweiter schwebender Knopf links neben der Kamera: sie war nur im
+     „Mehr"-Blatt erreichbar (zwei Taps) und damit praktisch unsichtbar. #}
+  <button type="button" class="fab fab-search cmdk-open" id="fab-search"
+          title="Suche" aria-label="Suche öffnen">{{ icon('search') }}</button>
+
+  <label class="fab" id="fab-receipt" title="Beleg fotografieren / hochladen"
+         aria-label="Beleg fotografieren / hochladen" tabindex="0">
+    {{ icon('camera') }}
+    {# Upload via app.js (initReceiptPhotoInputs): verkleinert das Foto VOR dem Upload. #}
+    <input type="file" name="photo" accept="image/*" hidden class="js-receipt-photo">
+  </label>
+
+  {# ----------  Mobile App-Navigation: untere Tab-Leiste (nur ≤820px sichtbar)  ---------- #}
+  {# Reihenfolge nach tatsaechlicher Nutzung am Handy: Uebersicht, Budget,
+     Sparziele, Abos. Buchungen und Konten sind Nachschlage-Seiten (lange Listen,
+     eher am PC) und stehen jetzt im „Mehr"-Blatt. #}
+  <nav class="mobile-nav" aria-label="Navigation">
+    <a class="mnav-item {% if active_tab == 'dashboard' %}active{% endif %}" href="/">
+      <svg class="mnav-ic" aria-hidden="true"><use href="#i-home"></use></svg>Übersicht</a>
+    <a class="mnav-item {% if active_tab == 'budget' %}active{% endif %}" href="/budget">
+      <svg class="mnav-ic" aria-hidden="true"><use href="#i-target"></use></svg>Budget</a>
+    <a class="mnav-item {% if active_tab == 'savings_goals' %}active{% endif %}" href="/savings-goals">
+      <svg class="mnav-ic" aria-hidden="true"><use href="#i-heart-b"></use></svg>Sparziele</a>
+    <a class="mnav-item {% if active_tab == 'subscriptions' %}active{% endif %}" href="/subscriptions">
+      <svg class="mnav-ic" aria-hidden="true"><use href="#i-repeat"></use></svg>Abos</a>
+    <button type="button" class="mnav-item {% if active_tab in ['transactions','accounts','forecast','compare','tax','prices','metrics','rules','import_bank','settings'] %}active{% endif %}" id="more-btn" aria-expanded="false" aria-controls="more-sheet">
+      <svg class="mnav-ic" aria-hidden="true"><use href="#i-menu"></use></svg>Mehr</button>
+  </nav>
+  <div class="more-backdrop" id="more-backdrop"></div>
+  <aside class="more-sheet" id="more-sheet" aria-label="Weitere Bereiche">
+    <div class="more-grip"></div>
+    {# S1: Schnell-Erfassen prominent oben — ersetzt den auf Mobile entfernten FAB. #}
+    <a href="/quick" class="more-cta">{{ icon('plus') }} Schnell erfassen</a>
+    <a href="/transactions" class="{% if active_tab == 'transactions' %}active{% endif %}">{{ icon('receipt') }} Buchungen</a>
+    <a href="/accounts" class="{% if active_tab == 'accounts' %}active{% endif %}">{{ icon('wallet') }} Konten</a>
+    <a href="/forecast" class="{% if active_tab == 'forecast' %}active{% endif %}">{{ icon('trending-up') }} Prognose</a>
+    <a href="/compare" class="{% if active_tab == 'compare' %}active{% endif %}">{{ icon('arrows-exchange') }} Vergleich</a>
+    <a href="/steuern" class="{% if active_tab == 'tax' %}active{% endif %}">{{ icon('id-badge') }} Steuern</a>
+    <a href="/preise" class="{% if active_tab == 'prices' %}active{% endif %}">{{ icon('trending-up') }} Preisverlauf</a>
+    <a href="/verlaeufe" class="{% if active_tab == 'metrics' %}active{% endif %}">{{ icon('chart-line') }} Verläufe</a>
+    <a href="/rules" class="{% if active_tab == 'rules' %}active{% endif %}">{{ icon('tag') }} Regeln</a>
+    <a href="/import" class="{% if active_tab == 'import_bank' %}active{% endif %}">{{ icon('upload') }} Import</a>
+    <a href="/settings" class="{% if active_tab == 'settings' %}active{% endif %}">{{ icon('settings') }} Einstellungen</a>
+    <div class="more-row">
+      <span>Erscheinungsbild</span>
+      <div class="theme-toggle" role="group" aria-label="Erscheinungsbild wählen">
+        {% for t in THEMES %}
+          <button type="button" data-theme-pick data-theme="{{ t.key }}" data-bg="{{ t.bg }}"
+                  data-dark="{{ 1 if t.dark else 0 }}" data-label="{{ t.label }}"
+                  aria-pressed="false">{{ t.label }}</button>
+        {% endfor %}
+      </div>
+    </div>
+    <a href="/logout">{{ icon('arrows-exchange') }} Abmelden</a>
+  </aside>
+
+  {# ----------  Globale Befehls-/Sprungsuche (Strg+K / ⌘+K)  ----------
+     CSP-konform: Logik in app.js, Ziele/Aktionen als data-Attribute. #}
+  <div class="cmdk" id="cmdk" hidden role="dialog" aria-modal="true" aria-label="Schnellsuche">
+    <div class="cmdk-backdrop" id="cmdk-backdrop"></div>
+    <div class="cmdk-panel" role="document">
+      <div class="cmdk-search">
+        {{ icon('search') }}
+        <input type="text" id="cmdk-input" class="cmdk-input" placeholder="Springen zu … (Seite oder Aktion)"
+               autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Suchen">
+        <kbd class="cmdk-esc">Esc</kbd>
+      </div>
+      <ul class="cmdk-list" id="cmdk-list" role="listbox">
+        <li class="cmdk-item" role="option" data-href="/" data-keywords="übersicht dashboard start home diagramme">
+          <span class="cmdk-ic">{{ icon('home') }}</span><span class="cmdk-lbl">Übersicht</span></li>
+        <li class="cmdk-item" role="option" data-href="/transactions" data-keywords="buchungen transaktionen ausgaben einnahmen timeline">
+          <span class="cmdk-ic">{{ icon('receipt') }}</span><span class="cmdk-lbl">Buchungen</span></li>
+        <li class="cmdk-item" role="option" data-href="/accounts" data-keywords="konten konto saldo vermögen bargeld bank">
+          <span class="cmdk-ic">{{ icon('wallet') }}</span><span class="cmdk-lbl">Konten</span></li>
+        <li class="cmdk-item" role="option" data-href="/budget" data-keywords="budget soll ist median ampel allokation">
+          <span class="cmdk-ic">{{ icon('target') }}</span><span class="cmdk-lbl">Budget</span></li>
+        <li class="cmdk-item" role="option" data-href="/subscriptions" data-keywords="abos abonnemente fixkosten wiederkehrend">
+          <span class="cmdk-ic">{{ icon('repeat') }}</span><span class="cmdk-lbl">Abos</span></li>
+        <li class="cmdk-item" role="option" data-href="/savings-goals" data-keywords="sparziele sparen ziel notgroschen reserve">
+          <span class="cmdk-ic">{{ icon('pig-money') }}</span><span class="cmdk-lbl">Sparziele</span></li>
+        <li class="cmdk-item" role="option" data-href="/forecast" data-keywords="prognose stresstest vermögen runway zukunft">
+          <span class="cmdk-ic">{{ icon('trending-up') }}</span><span class="cmdk-lbl">Prognose</span></li>
+        <li class="cmdk-item" role="option" data-href="/compare" data-keywords="vergleich monat jahr vorjahr vormonat">
+          <span class="cmdk-ic">{{ icon('arrows-exchange') }}</span><span class="cmdk-lbl">Vergleich</span></li>
+        <li class="cmdk-item" role="option" data-href="/steuern" data-keywords="steuern steuererklärung abzüge vermögen stichtag deklaration">
+          <span class="cmdk-ic">{{ icon('id-badge') }}</span><span class="cmdk-lbl">Steuerjahr</span></li>
+        <li class="cmdk-item" role="option" data-href="/preise" data-keywords="preise preisverlauf teuerung artikel quittungen belege inflation">
+          <span class="cmdk-ic">{{ icon('trending-up') }}</span><span class="cmdk-lbl">Preisverlauf</span></li>
+        <li class="cmdk-item" role="option" data-href="/rules" data-keywords="regeln kategorisierung inbox zuordnen stichwort">
+          <span class="cmdk-ic">{{ icon('tag') }}</span><span class="cmdk-lbl">Regeln &amp; Inbox</span></li>
+        <li class="cmdk-item" role="option" data-href="/categories" data-keywords="kategorien verwalten baum icon farbe">
+          <span class="cmdk-ic">{{ icon('archive') }}</span><span class="cmdk-lbl">Kategorien</span></li>
+        <li class="cmdk-item" role="option" data-href="/import" data-keywords="import camt csv bank quittungen belege upload">
+          <span class="cmdk-ic">{{ icon('upload') }}</span><span class="cmdk-lbl">Import &amp; Belege</span></li>
+        <li class="cmdk-item" role="option" data-href="/quick" data-keywords="schnell erfassen quick eingabe neu buchung">
+          <span class="cmdk-ic">{{ icon('plus') }}</span><span class="cmdk-lbl">Schnell erfassen</span></li>
+        <li class="cmdk-item" role="option" data-href="/settings" data-keywords="einstellungen theme pin passkey optionen">
+          <span class="cmdk-ic">{{ icon('settings') }}</span><span class="cmdk-lbl">Einstellungen</span></li>
+        {% for t in THEMES %}
+        <li class="cmdk-item" role="option" data-action="theme:{{ t.key }}"
+            data-keywords="theme erscheinungsbild skin {{ t.key }} {{ t.label|lower }}">
+          <span class="cmdk-ic">{{ icon('bulb') }}</span><span class="cmdk-lbl">Theme: {{ t.label }}</span><span class="cmdk-hint">Aktion</span></li>
+        {% endfor %}
+        <li class="cmdk-item" role="option" data-href="/logout" data-keywords="abmelden logout ausloggen verlassen">
+          <span class="cmdk-ic">{{ icon('arrows-exchange') }}</span><span class="cmdk-lbl">Abmelden</span><span class="cmdk-hint">Aktion</span></li>
+      </ul>
+      <div class="cmdk-empty" id="cmdk-empty" hidden>Nichts gefunden</div>
+    </div>
+  </div>
+
+  {# Das EINE Kategorie-Panel der Seite. Es steht hier in der Shell und nicht bei
+     den Auslösern, weil es damit ausserhalb JEDES HTMX-Ziels liegt: ein neu
+     gerendertes #transactions-root (nachlaufende Suche, Filterwechsel) kann ein
+     offenes Panel nicht mehr wegräumen — genau daran ging es vorher zu.
+     Als Block und nicht automatisch über `category_groups is defined`: sonst
+     trüge auch /quick die ~14 KB Pillen mit, obwohl es die Kategorien mit einem
+     eigenen Raster zeigt. Seiten mit Picker füllen den Block; dass keine es
+     vergisst, prüft tests/test_cat_picker.py. #}
+  {% block cat_panel %}{% endblock %}
+
+  {# Toast-Bereich: kurze Rückmeldungen, optional mit „Rückgängig" (vom JS befüllt). #}
+  <div class="toast-host" id="toast-host" aria-live="polite"></div>
+
+  {# Beleg-Scan: Overlay-Host für die digitale Quittung (per HTMX gefüllt; leer = versteckt). #}
+  <div class="kz-modal" id="kz-modal"></div>
+  {# Sperrschicht, solange am Beleg gerechnet oder gespeichert wird. Sie deckt
+     die ganze Fläche ab — währenddessen ist der Vorgang nicht abbrechbar.
+     app.js (kzSetBusy) schaltet sie und beschriftet sie je nach Schritt. #}
+  <div class="kz-analyzing" id="kz-analyzing" aria-hidden="true">
+    <div class="kz-an-box"><div class="kz-an-spin" aria-hidden="true"></div>
+      <span id="kz-an-text">Beleg wird analysiert …</span></div>
+  </div>
+
+</div>
+{% endblock %}

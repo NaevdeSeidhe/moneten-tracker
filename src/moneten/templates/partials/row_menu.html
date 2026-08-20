@@ -1,0 +1,11 @@
+{# Wiederverwendbares Zeilen-Aktionsmenü („⋯"). Hält das <details>-Gerüst inkl.
+   a11y-Attribute und name="rowmenu" (exklusives Aufklappen) an EINER Stelle. Die
+   konkreten Aktionen (HTMX-Buttons mit Klasse .rowmenu-item) kommen per
+       {% call row_menu() %} …Buttons… {% endcall %}
+   herein. Schliessen bei Klick-ausserhalb/Escape erledigt app.js initRowMenus. #}
+{% macro row_menu() %}
+<details class="rowmenu" name="rowmenu">
+  <summary title="Aktionen" aria-label="Aktionen">{{ icon('dots') }}</summary>
+  <div class="rowmenu-pop" role="menu">{{ caller() }}</div>
+</details>
+{% endmacro %}

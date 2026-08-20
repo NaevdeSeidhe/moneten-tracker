@@ -1,0 +1,243 @@
+{# Kompletter Inhalt des #accounts-root-Containers: Vermögens-Verlauf,
+   optionales Formular, Konten nach Typ gruppiert mit Sparklines + Anteilen.
+   Alle Aktionen zielen per hx-target auf #accounts-root zurück. #}
+
+{# ----------  Vermögens-Verlauf (12 Monate)  ----------
+   Aufbau der Karte: Kopf mit Leitzahl, darunter ein Raster aus
+   Beschriftungsspalte (.nw-yaxis) und Zeichenfläche (.nw-canvas), darunter die
+   Monatsnamen. Die Achsenbeschriftung steht als HTML NEBEN dem Chart, nicht
+   darin: das SVG wird mit preserveAspectRatio=none auf die Kartenbreite
+   gestreckt — SVG-Text würde dabei verzerren, und als Overlay lag er vorher auf
+   der Kurve. #}
+<div class="card mb-4 nw-card">
+  <div class="nw-head">
+    <div class="label-cap">Vermögens-Verlauf</div>
+    <div class="nw-now">
+      <div class="nw-value" data-countup="{{ nw_now }}">{{ nw_now | chf }}</div>
+      <div class="nw-change {{ 'pos' if nw_change >= 0 else 'neg' }}">
+        {{ '▲' if nw_change >= 0 else '▼' }} {{ nw_change.copy_abs() | chf }} <span class="muted">12 Mt.</span>
+      </div>
+    </div>
+  </div>
+  <div class="nw-wrap">
+    <div class="nw-yaxis" aria-hidden="true">
+      {% for t in nw_axis.y %}
+        <span class="nw-ylab" style="top:{{ t.pct }}%">{{ t.label }}</span>
+      {% endfor %}
+    </div>
+    {# data-monate trägt je Monat Beschriftung, Beträge und Punkt-Positionen —
+       daraus baut app.js Führungslinie und Werte-Kasten. #}
+    <div class="nw-canvas" data-monate='{{ nw_monate | tojson }}'>
+      {# Keine Verlaufsfläche mehr — Begründung in routers/accounts._verlauf_layout. #}
+      <svg class="nw-chart" viewBox="0 0 620 160" preserveAspectRatio="none"
+           role="img" aria-label="Vermögens-Verlauf der letzten 12 Monate">
+        {% for t in nw_axis.y %}
+          <line class="nw-grid" x1="0" x2="620" y1="{{ t.y }}" y2="{{ t.y }}"></line>
+        {% endfor %}
+        {# Konto-Linien VOR der Gesamtlinie: die zentrale Aussage liegt damit
+           obenauf und wird an keiner Kreuzung von einer Nebenlinie zerschnitten. #}
+        {% for l in nw_lines %}
+          <path class="nw-acc-line" d="{{ l.d }}" style="stroke:{{ l.farbe }}"></path>
+        {% endfor %}
+        {# Kontur in Kartenfarbe unter der Gesamtlinie: an jeder Kreuzung bleibt
+           sie eine durchgehende Linie statt eines Knotens aus drei Farben. #}
+        <path class="nw-line-kontur" d="{{ nw_chart.linie }}"></path>
+        <path class="nw-line" d="{{ nw_chart.linie }}"></path>
+      </svg>
+      {# Marken als HTML über dem SVG: ein <circle> im gestreckten viewBox wird
+         zur Ellipse, eine 1px-Linie darin zum Balken. #}
+      <div class="nw-marks" aria-hidden="true">
+        {% if nw_chart.linie %}
+          <span class="nw-dot" style="left:{{ nw_chart.last_px }}%;top:{{ nw_chart.last_py }}%"></span>
+        {% endif %}
+        <span class="nw-guide" hidden></span>
+        {% for l in nw_lines %}
+          <span class="nw-hdot" style="background:{{ l.farbe }}" hidden></span>
+        {% endfor %}
+        <span class="nw-hdot nw-hdot-total" hidden></span>
+      </div>
+      {# Werte-Kasten: Zeilen kommen aus derselben Schleife wie die Legende,
+         damit Farbmuster und Namen garantiert übereinstimmen. app.js schreibt
+         nur die Beträge hinein. #}
+      <div class="nw-tip" hidden aria-hidden="true">
+        <div class="nw-tip-monat"></div>
+        <div class="nw-tip-zeile nw-tip-gesamt">
+          <span class="nw-tip-name"><span class="legend-swatch"></span><span class="nw-legend-name">Gesamt</span></span>
+          <span class="nw-tip-wert mono"></span>
+        </div>
+        {% for l in nw_lines %}
+          <div class="nw-tip-zeile">
+            <span class="nw-tip-name"><span class="legend-swatch" style="background:{{ l.farbe }}"></span><span class="nw-legend-name">{{ l.name }}</span></span>
+            <span class="nw-tip-wert mono"></span>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% if nw_axis.x %}
+      <div class="nw-xlabs" aria-hidden="true">
+        {% for l in nw_axis.x %}
+          <span class="nw-xlab" style="left:{{ l.pct }}%;transform:translateX({{ l.shift }})">{{ l.label }}</span>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+  {% if nw_lines %}
+    <div class="nw-legend">
+      {# Ohne diesen Eintrag liest sich die Akzentlinie wie ein weiteres Konto. #}
+      <span class="nw-legend-item nw-legend-total" data-nw-serie="gesamt">
+        <span class="legend-swatch"></span><span class="nw-legend-name">Gesamtvermögen</span>
+      </span>
+      {% for l in nw_lines %}
+        <span class="nw-legend-item" data-nw-serie="{{ loop.index0 }}" title="{{ l.titel }}">
+          <span class="legend-swatch" style="background:{{ l.farbe }}"></span><span class="nw-legend-name">{{ l.name }}</span>
+        </span>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+
+{# ----------  Kopfzeile + Aktion  ---------- #}
+{# Konto-Verwaltung (anlegen/bearbeiten/archivieren/löschen) ist aus der Übersicht
+   ausgeblendet — sie kommt selten vor und würde nur stören. Über Einstellungen →
+   „Konten verwalten" (/accounts?manage=1) schaltet JS `body.acc-manage` an; dann
+   erscheinen der „+ Konto"-Button und die Aktions-Icons. Bleibt über HTMX-Swaps aktiv,
+   weil die Klasse am <body> hängt (nicht im neu gerenderten #accounts-root). #}
+<div class="acc-manage-hint muted text-sm mb-4">
+  Verwaltungsmodus · <a href="/accounts">Fertig</a>
+</div>
+<div class="acc-add-row mb-4" style="justify-content:flex-end;gap:10px;flex-wrap:wrap">
+  {% if form_mode == "none" %}
+    <button class="btn btn-primary"
+            hx-get="/accounts?form=new"
+            hx-target="#accounts-root" hx-swap="innerHTML">+ Konto hinzufügen</button>
+  {% endif %}
+</div>
+
+{% if error %}
+  <div class="feedback err" style="margin-bottom:14px">{{ error }}</div>
+{% endif %}
+
+{# ----------  Anlege-/Bearbeite-Formular  ---------- #}
+{% if form_mode in ("new", "edit") %}
+  {% set editing = (form_mode == "edit") %}
+  {% set post_url = ("/accounts/" ~ edit_account.id) if editing else "/accounts" %}
+  <form class="card sunken mb-4"
+        hx-post="{{ post_url }}" hx-target="#accounts-root" hx-swap="innerHTML">
+    <div class="label-cap card-head">
+      {{ "Konto bearbeiten" if editing else "Neues Konto" }}
+    </div>
+    <div class="grid-2" style="gap:14px">
+      <div>
+        <label for="acc-name">Name</label>
+        <input id="acc-name" name="name" class="full-w" required
+               value="{{ edit_account.name if editing else '' }}"
+               placeholder="z.B. Lohnkonto">
+      </div>
+      <div>
+        <label for="acc-type">Typ</label>
+        <select id="acc-type" name="type" class="full-w">
+          {% for value, label in type_choices %}
+            <option value="{{ value }}"
+              {% if editing and edit_account.type.value == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="acc-balance">Startsaldo</label>
+        <input id="acc-balance" name="balance" class="full-w" inputmode="decimal"
+               value="{{ '%.2f'|format(edit_account.opening_balance) if editing else '0.00' }}">
+      </div>
+      <div>
+        <label for="acc-currency">Währung</label>
+        <select id="acc-currency" name="currency" class="full-w">
+          {% set cur = edit_account.currency if editing else 'CHF' %}
+          <option value="CHF" {% if cur == 'CHF' %}selected{% endif %}>CHF</option>
+          <option value="EUR" {% if cur == 'EUR' %}selected{% endif %}>EUR</option>
+        </select>
+      </div>
+      <div style="grid-column:1 / -1">
+        <label for="acc-iban">IBAN (optional, für CAMT-Abgleich)</label>
+        <input id="acc-iban" name="iban" class="full-w"
+               value="{{ edit_account.iban or '' if editing else '' }}"
+               placeholder="CH..">
+      </div>
+    </div>
+    <div class="flex gap-2 mt-4">
+      <button type="submit" class="btn btn-primary">{{ "Speichern" if editing else "Anlegen" }}</button>
+      <button type="button" class="btn btn-ghost"
+              hx-get="/accounts?form=none" hx-target="#accounts-root" hx-swap="innerHTML">Abbrechen</button>
+    </div>
+  </form>
+{% endif %}
+
+{# ----------  Konten nach Typ — je Gruppe eine eigene Karte (nebeneinander)  ---------- #}
+{% if acc_groups %}
+  <div class="acc-cards">
+    {% for grp in acc_groups %}
+      <div class="card acc-card">
+        <div class="acc-card-head">
+          <span class="acc-group-title"><span class="legend-swatch" style="background:{{ grp.color }}"></span>{{ grp.label }}</span>
+          <span class="mono acc-card-sum">{{ grp.subtotal | chf }}</span>
+        </div>
+        {% for r in grp.accounts %}
+          <div class="acc-row2 {% if not r.acc.is_active %}dim{% endif %}">
+            <div class="flex items-center justify-between gap-2">
+              <span class="acc-name">{{ r.acc.name }}{% if not r.acc.is_active %} <span class="pill" style="color:var(--text-tertiary)">archiviert</span>{% endif %}</span>
+              <span class="mono">{{ r.acc.current_balance | chf }}</span>
+            </div>
+            {# Zweite Zeile trägt Typ/Datum links und den Anteilsbalken rechts.
+               Vorher war der Balken eine eigene dritte Zeile, und der
+               Prozentwert stand als Text direkt darüber — dieselbe Aussage
+               zweimal, dafür eine Zeile mehr pro Konto. #}
+            <div class="acc-row-meta">
+              <span class="muted text-sm">{{ type_labels.get(r.acc.type, r.acc.type.value) }}{% if r.last %} · {{ '%02d.%02d.%02d'|format(r.last.day, r.last.month, r.last.year % 100) }}{% endif %}</span>
+              <span class="share-bar acc-share" title="{{ r.share }}% des Vermögens"><span style="width:{{ r.share }}%; background:{{ grp.color }}"></span></span>
+            </div>
+            <div class="acc-actions2">
+              <button class="icon-action" title="Bearbeiten" aria-label="Bearbeiten"
+                      hx-get="/accounts?form=edit&id={{ r.acc.id }}"
+                      hx-target="#accounts-root" hx-swap="innerHTML">{{ icon('pencil') }}</button>
+              <button class="icon-action" title="{{ 'Reaktivieren' if not r.acc.is_active else 'Archivieren' }}"
+                      aria-label="{{ 'Reaktivieren' if not r.acc.is_active else 'Archivieren' }}"
+                      hx-post="/accounts/{{ r.acc.id }}/toggle"
+                      hx-target="#accounts-root" hx-swap="innerHTML">{{ icon('rotate' if not r.acc.is_active else 'archive') }}</button>
+              <button class="icon-action danger" title="Löschen" aria-label="Löschen"
+                      hx-post="/accounts/{{ r.acc.id }}/delete"
+                      hx-target="#accounts-root" hx-swap="innerHTML"
+                      hx-confirm="Konto „{{ r.acc.name }}“ wirklich endgültig löschen?">{{ icon('trash') }}</button>
+            </div>
+          </div>
+          {% if r.acc.type.value == 'cash' and r.acc.is_active %}
+            <details class="acc-inventory" style="margin:0 0 8px">
+              <summary class="muted text-sm" style="cursor:pointer">{{ icon('cash') }} Kassensturz — Bargeld zählen &amp; abgleichen</summary>
+              <form hx-post="/accounts/{{ r.acc.id }}/inventory" hx-target="#accounts-root" hx-swap="innerHTML"
+                    class="flex gap-2 items-center" style="margin:8px 0 4px">
+                <input name="counted" class="full-w" inputmode="decimal" required
+                       placeholder="Gezählter Betrag, z.B. 245.00">
+                <button type="submit" class="btn">Abgleichen</button>
+              </form>
+            </details>
+          {% endif %}
+        {% endfor %}
+        {% if not grp.accounts %}
+          <div class="muted text-sm" style="padding:8px 0">Keine Konten in dieser Gruppe.</div>
+        {% endif %}
+        {# Mini-Balkendiagramm unten: Anteil je Konto, animiert + Hover. Sitzt per
+           margin-top:auto am Kartenboden → alle Karten schliessen bündig ab. #}
+        {% set _active = grp.accounts | selectattr('acc.is_active') | list %}
+        {% if _active %}
+          <div class="accbars" aria-hidden="true">
+            {% for r in _active %}
+              <span class="accbar" data-tip="{{ r.acc.name }} · {{ r.acc.current_balance | chf }} · {{ r.share }}%"
+                    style="--c:{{ grp.color }}">
+                <span class="accbar-fill" style="--h:{{ r.share }}%"></span>
+              </span>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="muted text-sm" style="padding:12px 0">Noch keine Konten. Lege dein erstes Konto an.</div>
+{% endif %}

@@ -1,0 +1,46 @@
+{% extends "_shell.html" %}
+{% block title %}Positionen vereinheitlichen{% endblock %}
+{% block content %}
+<h1>Positionen vereinheitlichen</h1>
+
+{% if meldung %}<div class="feedback ok mb-4">{{ meldung }}</div>{% endif %}
+
+{% if not buendel %}
+  <div class="card">
+    <div class="muted">Keine unterschiedlichen Schreibweisen gefunden.</div>
+  </div>
+{% else %}
+  {# Je Gruppe eine Karte: die Entscheidung ist „welche Schreibweise gilt",
+     und die faellt man je Ware, nicht fuer alle auf einmal. #}
+  {% for b in buendel %}
+    <form class="card mb-4" method="post" action="/settings/positionen">
+      <div class="metric-label">{{ b.gesamt }}× erfasst{{ " — welche Schreibweise gilt?" if not b.eindeutig }}</div>
+      {% for name, anzahl in b.varianten %}
+        <label class="pos-zeile">
+          {# Vorausgewaehlt wird nur, wenn eine Schreibweise wirklich haeufiger
+             ist. Bei Gleichstand entscheidet sonst die alphabetische Reihenfolge,
+             also der Zufall — und ein unbedachter Klick legte den Bestand auf
+             den Lesefehler. `required` macht die Wahl dann zur Pflicht. #}
+          <input type="radio" name="kanonisch" value="{{ name }}" required
+                 {{ 'checked' if loop.first and b.eindeutig }}>
+          <span class="pos-name">{{ name }}</span>
+          <span class="mono muted">{{ anzahl }}×</span>
+          <input type="hidden" name="variante" value="{{ name }}">
+        </label>
+      {% endfor %}
+      <button type="submit" class="btn btn-primary mt-4">Zusammenlegen</button>
+    </form>
+  {% endfor %}
+{% endif %}
+
+{% if aliase %}
+  <details class="disclosure">
+    <summary>Gemerkte Schreibweisen ({{ aliase | length }})</summary>
+    <div class="muted text-sm">
+      {% for key, name in aliase.items() %}
+        <div><span class="mono">{{ key }}</span> → {{ name }}</div>
+      {% endfor %}
+    </div>
+  </details>
+{% endif %}
+{% endblock %}

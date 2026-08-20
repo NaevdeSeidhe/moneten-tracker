@@ -1,0 +1,93 @@
+# =========================================================================
+# Moneten-Tracker — Docker Compose (fertiges Abbild)
+#
+#   cp .env.example .env     # MONETEN_DB_KEY setzen, sonst bleibt die DB Klartext
+#   docker compose up -d
+#
+# Diese Datei LAEDT ein fertiges Abbild, statt es zu bauen. Der Bau zieht
+# Tesseract, OpenCV und einiges mehr; auf einem kleinen NAS dauert er viele
+# Minuten und braucht Platz, den es dort oft nicht gibt. Wer den Quelltext
+# aendert, nimmt stattdessen `docker-compose.quellbau.yml`.
+#
+# Der Container zieht beim Start selbst die Datenbank-Migrationen nach
+# (entrypoint.sh: `alembic upgrade head`) und startet danach den Webserver.
+# =========================================================================
+services:
+  moneten:
+    # Ohne Angabe die neuste Fassung. Wer genau wissen will, was laeuft, setzt
+    # MONETEN_FASSUNG=0.79.0 in die .env — dann bleibt der Stand stehen, bis er
+    # ihn selbst weiterdreht.
+    image: ghcr.io/naevdeseidhe/moneten-tracker:${MONETEN_FASSUNG:-latest}
+    container_name: moneten
+    restart: unless-stopped
+
+    # Speicher-Decke. Die OCR braucht beim Lesen eines Handy-Belegs kurzzeitig
+    # mehrere hundert MB — mit 512 MB wurde der Vorgang abgewuergt, und das Ergebnis
+    # war ein wortkarges „kein Text erkannt". Im Leerlauf braucht der Container
+    # rund 150 MB.
+    #
+    # `mem_limit` UND `deploy.resources` stehen beide da, weil Compose v1 das
+    # eine ignoriert und Swarm das andere. Wer nur eines braucht, laesst das
+    # andere stehen: es stoert nicht.
+    mem_limit: 1024m
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+
+    # Nur vom Host selbst erreichbar — die sichere Vorgabe.
+    #
+    # Davor gehoert ein Reverse-Proxy mit TLS (Caddy, nginx, der Proxy deines
+    # NAS). Der laeuft auf demselben Geraet und erreicht 127.0.0.1 weiterhin.
+    #
+    # **Warum nicht offen.** Auf allen Schnittstellen kann jedes Geraet im Netz
+    # die Anmeldeseite aufrufen. Dazu kommt: Docker maskiert jede Verbindung
+    # hinter dem Bruecken-Gateway, die App sieht also bei allen Anfragen
+    # dieselbe Adresse — die Login-Drossel haengt dann an einem Header, den der
+    # Absender selbst setzt. Mit dieser Bindung kommt nur der Proxy herein.
+    #
+    # Ohne Proxy und mit Zugriff aus dem LAN:  "8000:8000" — und wissen, was
+    # man tut. Ins offene Internet gehoert die App nicht (siehe README).
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    # -----------------------------------------------------------------
+    # Rechte im Container.
+    #
+    # **no-new-privileges.** Der Prozess kann nie mehr Rechte bekommen, als er
+    # hat — auch nicht ueber ein setuid-Programm im Abbild. Das Abgeben der
+    # Rechte beim Start (``setpriv`` im Entrypoint) bleibt erlaubt.
+    #
+    # **cap_drop/cap_add.** Docker gibt jedem Container ein gutes Dutzend
+    # Faehigkeiten mit, von denen dieser Dienst keine braucht. Gebraucht werden
+    # vier, alle nur beim Start: CHOWN/FOWNER/DAC_OVERRIDE, um den Datenordner
+    # zu uebereignen, SETUID/SETGID, um die Rechte danach abzugeben.
+    #
+    # **Wenn der Container nicht startet:** beide Bloecke auskommentieren,
+    # starten, Protokoll lesen. Es ist Haertung, keine Funktion.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+
+    env_file:
+      - .env
+
+    volumes:
+      # Datenbank, Belege und eigene Anbieterprofile. Dieser Ordner ist alles,
+      # was gesichert werden muss.
+      #
+      # Der Server laeuft unprivilegiert (UID 10001). Der Entrypoint setzt die
+      # Besitzrechte dieses Ordners beim ersten Start entsprechend — hier ist
+      # nichts von Hand zu tun. Eigene Werte gehen ueber MONETEN_UID/MONETEN_GID
+      # in der .env; kein `user:`-Eintrag hier, sonst koennte der Container die
+      # Rechte gar nicht erst richten.
+      - ./data:/app/data
+
+    # Der Healthcheck steht im Dockerfile.

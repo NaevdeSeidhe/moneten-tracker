@@ -1,0 +1,266 @@
+{# Inhalt von #rules-root: neue Regel anlegen, rückwirkend anwenden, Regel-Liste. #}
+{% from "partials/cat_picker.html" import cat_picker %}
+
+{% if message %}<div class="feedback ok" style="margin-bottom:16px">{{ message }}</div>{% endif %}
+
+{# ----------  Schnell zuordnen: unkategorisierte Buchungen nach Händler  ---------- #}
+{% if inbox_groups %}
+  <div class="card mb-4">
+    <div class="label-cap card-head">Schnell zuordnen</div>
+    {% if cat_total %}
+      {% set done_pct = ((cat_total - uncategorized) / cat_total * 100) | round %}
+      <div class="cat-funnel-inline">
+        <span class="cat-funnel-bar"><span style="width:{{ done_pct }}%"></span></span>
+        <span class="muted text-sm">{{ cat_total - uncategorized }}/{{ cat_total }} kategorisiert · <strong>{{ uncategorized }}</strong> offen</span>
+      </div>
+    {% endif %}
+    {# Globale Suche über ALLE offenen Buchungen (gruppenübergreifend): tippt man
+       z.B. „mcdonald", werden alle passenden Buchungen in allen Gruppen gezeigt
+       (Gruppen ohne Treffer ausgeblendet, Treffer-Gruppen automatisch aufgeklappt). #}
+    <input type="search" id="inbox-global-search" class="inbox-gsearch" autocomplete="off"
+           placeholder="Suchen…">
+    <div class="inbox-global-empty" hidden>Kein Treffer.</div>
+    <div class="inbox-list">
+      {% for g in inbox_groups %}
+        <div class="inbox-row">
+          <div class="inbox-merchant">
+            {# Kopfzeile = Klickfläche zum Aufklappen (KEINE Pille/kein Button): Händler
+               + Meta auf EINER Zeile, kleiner Chevron vorne, Hover hebt dezent hervor. #}
+            <button type="button" class="inbox-summary" aria-expanded="false" aria-controls="ibx-{{ loop.index }}">
+              <span class="inbox-chevron" aria-hidden="true"></span>
+              <span class="inbox-label">{{ g.label }}</span>
+              <span class="inbox-meta muted">{{ g.count }} Buchung{{ 'en' if g.count != 1 }} ·
+                <span style="color:{{ 'var(--accent-tertiary)' if g.total >= 0 else 'var(--dusty-rose)' }}">{{ '+' if g.total >= 0 }}{{ g.total | chf }}</span>
+                {%- if g.gemischt %} <span class="pill" style="color:var(--warn)" title="Ein- UND Ausgänge in dieser Gruppe — vor dem Zuordnen einzeln prüfen">± gemischt</span>{% endif %}
+                {#- Das Stichwort steht meist wörtlich im Händlernamen darüber („Beispielmarkt"
+                    → „beispielmarkt"). Zweimal dieselbe Zeichenfolge kostete auf 375 px einen
+                    ganzen Zeilenumbruch, ohne etwas zu sagen — es erscheint deshalb nur noch,
+                    wenn es sich vom Namen unterscheidet. Im Bestätigungsdialog steht es immer.
+                    Der Vorschlag stand hier als Text UND ausgewählt im Kategorie-Feld
+                    darunter; die Auswahl zeigt ihn, der Text war die Dopplung. -#}
+                {%- set kw = (g.keyword or '') | lower %}
+                {%- if kw and kw not in ((g.label or '') | lower) %} · „{{ g.keyword }}“{% endif %}</span>
+            </button>
+            <div class="inbox-expand" id="ibx-{{ loop.index }}" hidden>
+              {# Werkzeugleiste OBEN: filtern + alle markieren + (bei Auswahl) Kategorie
+                 wählen & zuordnen — alles direkt sichtbar, nicht unter 29 Zeilen vergraben. #}
+              <div class="inbox-tools">
+                <input type="search" class="inbox-search" autocomplete="off"
+                       placeholder="Filtern…">
+              </div>
+              {# Bulk-Leiste: erscheint OBEN, sobald etwas markiert ist. #}
+              <div class="inbox-bulk" hidden>
+                <span class="inbox-bulk-count"><strong>0</strong> gewählt →</span>
+                {{ cat_picker("category_id", category_groups, none_label="— Kategorie wählen —") }}
+                <button type="button" class="btn btn-primary text-sm inbox-bulk-btn"
+                        hx-post="/rules/assign-many" hx-target="#rules-root" hx-swap="innerHTML"
+                        hx-include="closest .inbox-expand">{{ icon('check') }} Zuordnen</button>
+              </div>
+              {# Alle auswählen — nur die Box, links bündig in der Checkbox-Spalte (über den
+                 Zeilen). Häkchen wählt alle sichtbaren; JS spiegelt es auf alle .inbox-cb. #}
+              <label class="inbox-selall-row">
+                <input type="checkbox" class="inbox-selall-cb" aria-label="Alle sichtbaren auswählen" title="Alle sichtbaren auswählen">
+              </label>
+              {# Leichte Zeilen mit Checkbox; einzeln „zuordnen" lädt den Picker je Zeile. #}
+              {% for t in g.transactions %}
+                {% with tx=t, mode="light" %}{% include "partials/inbox_tx.html" %}{% endwith %}
+              {% endfor %}
+              {% if g.count > (g.transactions | length) %}
+                <div class="muted text-sm" style="padding:6px 0 0 10px">… und {{ g.count - (g.transactions | length) }} weitere (neueste {{ g.transactions | length }} gezeigt).</div>
+              {% endif %}
+            </div>
+          </div>
+          {# „Ganze Gruppe" ordnet ALLE {{ g.count }} zu (+ merkt Regel) — mit
+             Sicherheitsabfrage, damit nicht versehentlich alles zugewiesen wird. #}
+          <form class="inbox-group-form" hx-post="/rules/assign-group" hx-target="#rules-root" hx-swap="innerHTML"
+                {# Das schliessende Anführungszeichen war ein gerades " und beendete
+                   damit das Attribut: die Sicherheitsabfrage brach nach dem Stichwort
+                   ab („ALLE 3 Buchung(en) der Gruppe „beispielmarkt") und verschwieg
+                   genau den Teil, um den es geht — zuordnen UND Regel merken. Der Rest
+                   des Satzes landete als fünf Schein-Attribute im Formular. #}
+                hx-confirm="ALLE {{ g.count }} Buchung{{ 'en' if g.count != 1 }} der Gruppe „{{ g.keyword }}“ dieser Kategorie zuordnen und Regel merken?">
+            <input type="hidden" name="keyword" value="{{ g.keyword }}">
+            <span class="inbox-pick">
+              {{ cat_picker("category_id", category_groups,
+                            selected=(g.suggested_category_id or ""),
+                            none_label="— Kategorie wählen —") }}
+            </span>
+            <button type="submit" class="btn btn-primary text-sm"
+                    title="Ganze Gruppe ({{ g.count }}) zuordnen &amp; Regel merken">{{ icon('check') }} Alle ({{ g.count }})</button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
+
+<div class="grid-main">
+
+  {# ----------  Neue Regel + rückwirkend anwenden  ---------- #}
+  <div class="card">
+    <div class="label-cap card-head">Neue Regel</div>
+    <form hx-post="/rules" hx-target="#rules-root" hx-swap="innerHTML">
+      <div class="grid-2" style="gap:14px">
+        <div>
+          <label for="rule-kw">Stichwort (im Buchungstext)</label>
+          <input id="rule-kw" name="keyword" class="full-w" placeholder="z.B. supermarkt" required>
+          <div class="text-sm muted" style="margin-top:4px">Die erste passende Regel gewinnt.</div>
+        </div>
+        <div>
+          <label>Kategorie</label>
+          {{ cat_picker("category_id", category_groups, selected="", none_label="— Kategorie wählen —") }}
+        </div>
+      </div>
+      <div class="flex gap-2 mt-4"><button type="submit" class="btn btn-primary">Regel hinzufügen</button></div>
+    </form>
+
+    <details style="margin-top:14px">
+      <summary class="muted text-sm" style="cursor:pointer">Mehrere Regeln auf einmal einfügen…</summary>
+      <form hx-post="/rules/bulk" hx-target="#rules-root" hx-swap="innerHTML" style="margin-top:10px">
+        <textarea name="text" class="full-w" rows="7"
+                  style="font-family:ui-monospace,Consolas,monospace; padding:10px; resize:vertical"
+                  placeholder="onlineshop = Gaming&#10;anbieter = Internet / TV&#10;arbeitgeber = Nettolohn&#10;# Zeilen mit # werden ignoriert"></textarea>
+        <button type="submit" class="btn" style="margin-top:6px">Alle einfügen</button>
+      </form>
+    </details>
+
+    <div class="banner-ok" style="margin-top:16px">
+      <div class="flex items-center justify-between gap-3" style="flex-wrap:wrap">
+        <span><strong>{{ uncategorized }}</strong> ohne Kategorie</span>
+        <button class="btn btn-primary" hx-post="/rules/apply" hx-target="#rules-root" hx-swap="innerHTML"
+                hx-confirm="Regeln auf {{ uncategorized }} Buchung{{ 'en' if uncategorized != 1 }} ohne Kategorie anwenden?">
+          Regeln rückwirkend anwenden
+        </button>
+      </div>
+    </div>
+  </div>
+
+  {# ----------  Bestehende Regeln  ---------- #}
+  <div class="card">
+    <div class="label-cap card-head">Regeln ({{ rules | length }})</div>
+    {% if rules %}
+      {# Eine Regel ist eine Zeile: Stichwort → Kategorie, rechts der Papierkorb.
+         Der Knopf hiess „Löschen" und war so breit, dass er auf 375 px in eine
+         eigene Zeile rutschte — jede Regel mass damit 106 px, bei 51 Regeln über
+         5000 px Liste. Das Wort steht weiter in title/aria-label und in der
+         Sicherheitsabfrage, die die Regel beim Namen nennt. #}
+      {% for r in rules %}
+        <div class="row regel-zeile">
+          {% set kat_name = r.category.name if r.category else cat_names.get(r.category_id, '—') %}
+          <span class="flex items-center gap-3" style="min-width:0">
+            <span class="mono regel-kw" title="{{ r.keyword }}">„{{ r.keyword }}“</span>
+            {# Pfeil und Ziel sind EIN Element: bricht die Zeile um, sollen sie
+               zusammen umbrechen. Als Geschwister landete der Pfeil allein am
+               Zeilenende und die Regel stand auf drei Zeilen. #}
+            <span class="regel-ziel">
+              <span class="muted">→</span>
+              <span class="pill regel-kat" title="{{ kat_name }}">
+                {% if r.category %}{{ icon(r.category.icon) }}{% endif %}<span class="regel-kat-txt">{{ kat_name }}</span>
+              </span>
+            </span>
+          </span>
+          <button class="icon-action danger" title="Regel löschen" aria-label="Regel „{{ r.keyword }}“ löschen"
+                  hx-post="/rules/{{ r.id }}/delete" hx-target="#rules-root" hx-swap="innerHTML"
+                  hx-confirm="Regel „{{ r.keyword }}“ löschen?">{{ icon('trash') }}</button>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="muted text-sm" style="padding:12px 0">Noch keine Regeln.</div>
+    {% endif %}
+  </div>
+
+
+{# ----------  Aufräumen: was tot ist, ohne aufzufallen  ----------
+   Bewusst nur Befunde mit Begründung, keine Automatik. Ein Werkzeug, das selbst
+   löscht, ist gefährlicher als der Ballast, den es entfernt. #}
+{% if hygiene.anzahl %}
+<details class="card mt-4 bgrp">
+  <summary class="bgrp-head">
+    <span class="bgrp-title">{{ icon('archive', "cat-icon lg") }}<span>Aufräumen</span></span>
+    <span class="bgrp-vals">
+      <span class="bgrp-rest mono">{{ hygiene.anzahl }}</span>
+      <span class="bgrp-sub">Befunde</span>
+    </span>
+  </summary>
+  <div class="bgrp-body">
+
+    {# Die Überschriften tragen den Befund bereits („ohne Treffer", „ohne
+       Buchung"). Die Sätze darunter sagten dasselbe noch einmal und schoben den
+       ersten Befund 69 px nach unten; was sie an ECHTER Angabe enthielten — die
+       Schwelle von {{ hygiene.monate }} Monaten — steht jetzt als Wert neben der
+       Überschrift. Die Warnung bei den überdeckten Regeln behält ihren Satz:
+       dort ist die FOLGE die Information, nicht der Zustand. #}
+    {% if hygiene.ohne_treffer %}
+      <div class="hyg-block">
+        <div class="label-cap">Regeln ohne Treffer ({{ hygiene.ohne_treffer | length }})</div>
+        {% for e in hygiene.ohne_treffer %}
+          <div class="row">
+            <span class="mono">{{ e.regel.keyword }}</span>
+            <span class="muted text-sm">→ {{ e.kategorie.name if e.kategorie else '—' }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if hygiene.ueberdeckt %}
+      <div class="hyg-block">
+        <div class="label-cap">Überdeckte Regeln ({{ hygiene.ueberdeckt | length }})</div>
+        {# Bleibt ein Satz: hier droht eine FOLGE (die Regel greift nie), und die
+           steht in keiner Zahl. Weg ist nur die erste Hälfte — welche Regel
+           vorher greift, sagt jede Zeile ohnehin selbst. #}
+        <p class="muted text-sm">Kommen nie zum Zug.</p>
+        {% for e in hygiene.ueberdeckt %}
+          <div class="row">
+            <span class="mono">{{ e.regel.keyword }}</span>
+            <span class="muted text-sm">verdeckt von „{{ e.verdeckt_von.keyword }}“
+              → {{ e.andere_kategorie.name if e.andere_kategorie else '—' }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if hygiene.eingeschlafen %}
+      <div class="hyg-block">
+        <div class="label-cap">Kategorien ohne Buchung ({{ hygiene.eingeschlafen | length }})
+          <span class="hyg-mass">{{ hygiene.monate }} Mt. still</span></div>
+        {% for e in hygiene.eingeschlafen[:12] %}
+          <div class="row">
+            <span class="flex items-center gap-2">{{ icon(e.kategorie.icon) }}{{ e.kategorie.name }}</span>
+            <span class="muted text-sm">{{ 'zuletzt ' ~ e.zuletzt.strftime('%m.%Y') if e.zuletzt else 'noch nie' }}</span>
+          </div>
+        {% endfor %}
+        {# Die Liste bricht bei 12 ab. Ohne diese Zeile behauptete die Überschrift
+           52 Befunde und zeigte 12 — der Rest verschwand spurlos. #}
+        {% if (hygiene.eingeschlafen | length) > 12 %}
+          <div class="muted text-sm" style="padding:6px 0 0">… {{ (hygiene.eingeschlafen | length) - 12 }} weitere</div>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {% if hygiene.totes_budget %}
+      <div class="hyg-block">
+        {# „das bläht dein Monatsbudget auf" war die Folge — als Satz ungefähr, als
+           Summe genau: so viel Soll steht auf Kategorien, die nichts mehr kosten. #}
+        <div class="label-cap">Budget ohne Ausgaben ({{ hygiene.totes_budget | length }})
+          <span class="hyg-mass">{{ hygiene.monate }} Mt. still ·
+            {{ hygiene.totes_budget | sum(attribute='betrag') | chf }} Soll</span></div>
+        {% for e in hygiene.totes_budget %}
+          <div class="row">
+            <span class="flex items-center gap-2">{{ icon(e.kategorie.icon) }}{{ e.kategorie.name }}</span>
+            <span class="mono text-sm">{{ e.betrag | chf }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {# Der Hinweis auf die Regeln oben beschrieb, was man sieht — die Regel-Karte
+       steht auf derselben Seite. Die Zusicherung bleibt: dass hier nichts von
+       selbst passiert, sieht man dem Kasten nicht an. #}
+    <p class="muted text-sm mt-4">
+      Nichts wird automatisch geändert. <a href="/categories">Kategorien verwalten</a>
+    </p>
+  </div>
+</details>
+{% endif %}
+
+</div>

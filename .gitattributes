@@ -1,0 +1,26 @@
+# Zeilenenden festnageln.
+#
+# **Warum das hier steht.** Ein Shell-Skript mit CRLF sieht in jedem Editor
+# richtig aus und scheitert im Container mit einer Meldung, die nichts mit der
+# Ursache zu tun hat:
+#
+#     line 17: set: pipefail: invalid option name
+#
+# Die Shell liest dann `pipefail\r` als Optionsnamen. Genau das ist beim Bauen
+# dieses Projekts passiert — eine Bearbeitung unter Windows hatte `backup.sh`
+# auf CRLF gedreht, und aufgefallen ist es erst mitten im Deploy.
+#
+# Ohne diese Datei entscheidet die Git-Einstellung des Klonenden
+# (`core.autocrlf`), wie die Dateien im Arbeitsverzeichnis landen. Unter Windows
+# ist `true` die Vorgabe vieler Installationen — dann bekommt jeder, der dieses
+# Repository dort klont und das Abbild baut, denselben Fehler.
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+*.py        text eol=lf
+*.toml      text eol=lf
+*.yml       text eol=lf
+
+# Binärdateien nie anfassen.
+*.png       binary
+*.woff2     binary
+*.pdf       binary

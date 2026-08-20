@@ -1,0 +1,6 @@
+{# <option>s für die Server-Suche im Zuordnen-Dropdown — über ALLE noch offenen
+   Buchungen (beliebiges Datum), damit auch per Überweisung bezahlte Rechnungen
+   (Zahlung Wochen nach Rechnungsdatum) gefunden und verknüpft werden können.
+   Gerendert von GET /import/receipts/tx-options, ersetzt #tx-select-{idx} innerHTML. #}
+{% for tx in txs %}<option value="{{ tx.id }}">{{ tx.date.strftime('%d.%m.%Y') }} · {{ tx.description or '(ohne Beschreibung)' }} · {{ tx.amount | chf }}</option>
+{% endfor %}{% if not txs %}<option value="">— keine Buchung gefunden (anderen Betrag/Text probieren) —</option>{% endif %}

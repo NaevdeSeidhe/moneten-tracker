@@ -1,0 +1,42 @@
+{# Eine Einzelbuchung in der Schnell-Zuordnen-Inbox — drei Zustände (mode):
+   * "light" (Standard): nur Datum/Beschreibung/Betrag + Knopf „zuordnen". KEIN
+     Picker vorab → die Liste bleibt leicht und schnell, auch auf dem Handy.
+   * "pick":  Picker wird erst auf Klick geladen (HTMX), ersetzt nur diese Zeile.
+   * "done":  grün bestätigt, direkt in der Zeile.
+   Zuweisen rendert NUR diese Zeile neu (hx-target=this) → die Gruppe bleibt offen
+   und es ist sofort statt die ganze Seite neu aufzubauen. #}
+{% from "partials/cat_picker.html" import cat_picker %}
+{% if mode == "done" %}
+  <div class="inbox-tx is-done">
+    <span class="mono muted">{{ tx.date.strftime('%d.%m.%y') }}</span>
+    <span class="inbox-tx-desc">{{ tx.desc }}</span>
+    <span class="inbox-done">{{ icon('shield-check') }} {{ done_cat }}</span>
+  </div>
+{% elif mode == "pick" %}
+  {# „zuordnen" → Picker klappt SOFORT auf; die Auswahl ordnet direkt zu: der Picker
+     feuert beim Wählen ein change-Event, das den assign-one-POST auslöst (transaction_id
+     kommt via hx-include mit). Kein OK-Knopf mehr — nur ✕ zum Abbrechen. #}
+  <div class="inbox-tx">
+    <input type="hidden" name="transaction_id" value="{{ tx.id }}">
+    <span class="mono muted">{{ tx.date.strftime('%d.%m.%y') }}</span>
+    <span class="inbox-tx-desc">{{ tx.desc }}</span>
+    {{ cat_picker("category_id", category_groups, selected=(suggested or ""),
+                  none_label="Kategorie wählen", allow_none=false, autoopen=true,
+                  hx='hx-post="/rules/assign-one" hx-target="closest .inbox-tx" hx-swap="outerHTML" hx-include="closest .inbox-tx" hx-trigger="change"') }}
+    <button type="button" class="btn btn-ghost text-sm" title="Abbrechen"
+            hx-get="/rules/row/{{ tx.id }}?light=1" hx-target="closest .inbox-tx" hx-swap="outerHTML">✕</button>
+  </div>
+{% else %}
+  <div class="inbox-tx inbox-tx-light" data-desc="{{ (tx.desc or '')|lower }}">
+    <input type="checkbox" class="inbox-cb" name="transaction_id" value="{{ tx.id }}"
+           aria-label="Buchung auswählen">
+    <span class="mono muted">{{ tx.date.strftime('%d.%m.%y') }}</span>
+    <span class="inbox-tx-desc">{{ tx.desc }}</span>
+    {# Mit Vorzeichen und in derselben Farbcodierung wie die Buchungsliste: beim
+       Zuordnen ist „kostet mich" oder „bringt mir" die entscheidende Auskunft. #}
+    <span class="mono" style="color:{{ 'var(--accent-tertiary)' if tx.amount >= 0 else 'var(--dusty-rose)' }}">
+      {{ '+' if tx.amount >= 0 }}{{ tx.amount | chf }}</span>
+    <button type="button" class="btn btn-ghost text-sm" title="Dieser Buchung eine Kategorie geben"
+            hx-get="/rules/row/{{ tx.id }}" hx-target="closest .inbox-tx" hx-swap="outerHTML">zuordnen</button>
+  </div>
+{% endif %}

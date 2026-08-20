@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Anmelden — Moneten-Tracker{% endblock %}
+
+{% block body %}
+{% include "partials/icon_sprite.html" %}
+{# `data-auto-passkey` ist der Schalter fuer die automatische Abfrage; app.js
+   liest ihn. Als Attribut und nicht als Skript-Zeile, damit die Entscheidung
+   dort steht, wo sie faellt — im Server, der weiss, ob gerade abgemeldet
+   wurde. #}
+<div class="login-shell" data-auto-passkey="{{ '1' if auto_passkey else '0' }}">
+  <div class="login-card">
+
+    <div class="login-brand">
+      <img class="brand-logo" src="/static/img/logo.png" alt="Moneten-Tracker Logo">
+      <h1>Moneten-Tracker</h1>
+    </div>
+
+    <form id="pin-form"
+          hx-post="/login"
+          hx-target="#login-error-box"
+          hx-swap="innerHTML"
+          autocomplete="off">
+      <input type="hidden" name="pin" value="">
+
+      <div class="pin-display" aria-hidden="true">
+        {% for i in range(6) %}<div class="pin-dot"></div>{% endfor %}
+      </div>
+
+      <div class="pin-keypad" role="group" aria-label="PIN-Tastenfeld">
+        <button type="button" class="pin-key" data-digit="1">1</button>
+        <button type="button" class="pin-key" data-digit="2">2</button>
+        <button type="button" class="pin-key" data-digit="3">3</button>
+        <button type="button" class="pin-key" data-digit="4">4</button>
+        <button type="button" class="pin-key" data-digit="5">5</button>
+        <button type="button" class="pin-key" data-digit="6">6</button>
+        <button type="button" class="pin-key" data-digit="7">7</button>
+        <button type="button" class="pin-key" data-digit="8">8</button>
+        <button type="button" class="pin-key" data-digit="9">9</button>
+        <button type="button" class="pin-key ghost" tabindex="-1" aria-hidden="true"></button>
+        <button type="button" class="pin-key" data-digit="0">0</button>
+        {# ⌫ statt ← : Der Linkspfeil wurde als „bestätigen" gelesen. Bestätigt wird
+           aber automatisch bei der sechsten Ziffer — diese Taste löscht. Entfernen
+           wäre die naheliegende, falsche Antwort gewesen: dann führt jeder Vertipper
+           zu einer Fehlanmeldung. #}
+        <button type="button" class="pin-key utility" data-action="back"
+                aria-label="Letzte Ziffer löschen" title="Letzte Ziffer löschen">⌫</button>
+      </div>
+
+      <div id="login-error-box" class="text-center"></div>
+    </form>
+
+    <div class="text-center" style="margin-top:18px">
+      <button type="button" id="wa-login" class="btn btn-ghost">{{ icon('shield-lock') }} Mit Passkey anmelden</button>
+      <div id="wa-login-msg" class="text-sm" style="margin-top:6px"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

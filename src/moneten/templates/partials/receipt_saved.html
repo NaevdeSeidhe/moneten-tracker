@@ -1,0 +1,25 @@
+{# Bestätigung nach dem Speichern einer digitalen Quittung (wird in #kz-modal geswappt). #}
+<div class="kz-saved-ov">
+  <div class="kz-saved">
+    {% if error %}
+      <div class="kz-saved-ic err">!</div>
+      <div>{{ error }}</div>
+    {% elif result and result.attached_tx_id and tx %}
+      <div class="kz-saved-ic ok">✓</div>
+      <div>Beleg gespeichert und der Buchung<br><strong>„{{ tx.description or 'Buchung' }}"</strong> ({{ tx.amount.copy_abs() | chf }}) zugeordnet.</div>
+    {% else %}
+      <div class="kz-saved-ic pend">⏳</div>
+      <div><strong>{{ merchant }}</strong> gespeichert.<br>Wird automatisch zugeordnet, sobald die passende Buchung im Konto erscheint.</div>
+    {% endif %}
+    {# Der Server prueft die Positionen ein zweites Mal und verwirft sie, wenn
+       die Summe nicht aufgeht oder ein Preis ausserhalb der Spanne liegt. Ohne
+       diese Zeile stand danach nur „gespeichert" — Beleg und Total sind da, die
+       Aufteilung fehlt, und niemand sagt es. #}
+    {% if result and result.verworfene_positionen %}
+      <div class="kz-saved-warn">Aufstellung verworfen: {{ result.verworfene_positionen }}
+        Position{{ 'en' if result.verworfene_positionen != 1 }} ergeben nicht den Beleg-Total.
+        Beleg, Datum und Betrag sind gespeichert.</div>
+    {% endif %}
+    <button type="button" class="btn btn-primary" id="kz-saved-close">Fertig</button>
+  </div>
+</div>

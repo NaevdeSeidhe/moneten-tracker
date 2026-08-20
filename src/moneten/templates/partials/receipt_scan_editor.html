@@ -1,0 +1,27 @@
+{# Editierbare digitale Quittung nach dem Foto-Upload. Die Daten kommen als JSON
+   in data-Attributen; app.js (initReceiptScan) rendert + macht alles editierbar.
+   Wird in #kz-modal eingeswappt. #}
+<div class="kz-scan" id="kz-scan"
+     data-receipt='{{ receipt | tojson if receipt else "{}" }}'
+     data-categories='{{ categories | tojson }}'>
+  {% if error %}<div class="feedback err" style="margin:10px 0">{{ error }}</div>{% endif %}
+  <div class="kz-sheet">
+    <div class="kz" id="kz-paper" aria-live="polite"></div>
+    {# INNERHALB von .kz-sheet. Erster Versuch stand darunter, ausserhalb der
+       sichtbaren Dialogflaeche — und war damit schlicht nicht da.
+       Der Rohtext ist die einzige Antwort auf „warum steht da das?"; wenn die
+       Erkennung danebenliegt, ist er das Einzige, was weiterhilft. #}
+    {% if ocr_text %}
+      <details class="kz-roh">
+        <summary>Rohtext der Erkennung</summary>
+        <pre>{{ ocr_text }}</pre>
+      </details>
+    {% endif %}
+    <div class="kz-actions">
+      <button type="button" class="btn" id="kz-cancel">Abbrechen</button>
+      <button type="button" class="btn btn-primary" id="kz-confirm">Bestätigen &amp; speichern</button>
+    </div>
+  </div>
+  <textarea id="kz-ocr" hidden>{{ ocr_text or '' }}</textarea>
+  <input type="hidden" id="kz-image" value="{{ image_path or '' }}">
+</div>

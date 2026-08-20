@@ -1,0 +1,912 @@
+{% extends "_shell.html" %}
+{% block title %}Verläufe — Moneten-Tracker{% endblock %}
+
+{#  ==========================================================================
+    Verlaufsreihen: Prämie, Stromrechnung, Lohn, Vorsorgeguthaben.
+
+    ERWARTETER KONTEXT (der Router muss ihn liefern):
+      verlaeufe      list[metrics.Verlauf]   alle nicht archivierten Reihen
+      formatiere     metrics.formatiere      Funktion, direkt in den Kontext gelegt
+      heute          datetime.date           Vorschlagswert der Nachtrag-Formulare
+      error          str | None              Meldung eines fehlgeschlagenen Formulars
+      form_slug      str | None              Reihe, deren Formular den Fehler warf
+      form_values    dict | None             zuletzt getippte Rohwerte
+      import_report  obj | None              Ergebnis des letzten JSON-Imports
+      abgleiche      dict[slug, Abgleich]    Beleg gegen Buchung, aus services/soll_ist.py
+      fixposten_takt metrics.fixposten_takt  Funktion Reihe → BudgetInterval | None
+
+    `formatiere` kommt als Funktion und nicht als Filter in den Kontext, weil
+    die Einheit (CHF/kWh/%) an der Reihe hängt und nicht an der Zahl — würde
+    das Template selbst formatieren, gäbe es zwei Wahrheiten für dieselbe
+    Frage. Die Währung stellt `wert_text` davor: `formatiere` liefert bei CHF
+    bewusst nur die Zahl (wie `chf_wert`), damit sie in Listen nicht 100x
+    „CHF" wiederholt.
+
+    KEIN EIGENES PARTIAL: Die beiden häufigen Aktionen (Wert nachtragen,
+    Wert löschen) tauschen per HTMX nur `#verlaeufe-root` aus und holen sich
+    diesen Ausschnitt mit `hx-select` aus der VOLLSTÄNDIGEN Antwort dieser
+    Seite. Die Alternative — Rumpfseite + Partial wie bei den Abos — wäre hier
+    eine zweite Datei für genau einen Ausschnitt, den nur diese Seite kennt.
+    Import und Bestätigung laufen als gewöhnlicher POST mit Neuaufbau: sie
+    ändern auch den Import-Bereich AUSSERHALB des getauschten Bereichs.
+    ========================================================================== #}
+
+{# Enum-Wert → deutsches Wort. Als Wörterbuch und nicht als if-Kette, damit
+   eine neue Einheit/ein neuer Takt an EINER Stelle nachzutragen ist. #}
+{% set TAKT = {'monatlich': 'monatlich', 'quartalsweise': 'quartalsweise',
+               'jaehrlich': 'jährlich', 'unregelmaessig': 'unregelmässig'} %}
+{% set TAKT_ERWARTET = {'monatlich': 'Erwartet wird ein Wert je Monat.',
+                        'quartalsweise': 'Erwartet wird ein Wert je Quartal.',
+                        'jaehrlich': 'Erwartet wird ein Wert je Jahr.',
+                        'unregelmaessig': 'Ein Wert, sooft ein Beleg kommt.'} %}
+{% set EINHEIT = {'chf': 'CHF', 'kwh': 'kWh', 'prozent': '%'} %}
+{# Die Perioden EINER Reihe, benannt nach ihrem Takt. „28 Monate ohne Buchung"
+   sagt, was „28 nicht gebucht" nicht sagte: worüber gezählt wird. #}
+{% set PERIODEN = {'monatlich': 'Monate', 'quartalsweise': 'Quartale',
+                   'jaehrlich': 'Jahre', 'unregelmaessig': 'Perioden'} %}
+{# Der Takt als Beiwort des Betrags im Knopf („CHF 449.20 monatlich ins
+   Budget"). Nur die beiden Takte, die ein Fixposten führen kann. #}
+{% set FIX_TAKT = {'monatlich': 'monatlich', 'jaehrlich': 'jährlich'} %}
+
+{# Farbe je Art der Reihe — NIE serverseitig als Hex, sonst folgt das Diagramm
+   dem Theme-Wechsel erst beim nächsten Seitenaufbau (gemeldeter Fehler).
+   Ausgabe = warm/rot, Einnahme = grün, Vermögen = die Sparfarbe: dieselbe
+   Zuordnung wie in den Donuts der Übersicht. #}
+{% set FARBE = {'ausgabe': 'var(--chart-reserve)',
+                'einnahme': 'var(--chart-income)',
+                'vermoegen': 'var(--chart-save)'} %}
+
+{# ----------  Zahl mit Einheit  ------------------------------------------
+   `secondary_unit` ist laut Modell optional — ohne Einheit bleibt die nackte
+   Zahl, denn eine erfundene Einheit wäre schlimmer als keine. #}
+{% macro wert_text(wert, einheit) %}{% if wert is none %}—{% elif not einheit %}{{ wert }}{% else %}{{ 'CHF ' if einheit.value == 'chf' }}{{ formatiere(wert, einheit) }}{% endif %}{% endmacro %}
+
+{# Achsenbeschriftung OHNE Währungskürzel: „CHF" steht schon an der Leitzahl
+   und in der Legende, kostet an der Achse aber rund 26px, die auf 375px dem
+   Zeichenfeld fehlen (bei zwei Achsen blieben davon nur 187px übrig,
+   nachgemessen). Genau die Überlegung hinter dem Filter `chf_wert`. kWh und
+   Prozent bleiben stehen — dort IST die Einheit die Information. #}
+{% macro achsen_text(wert, einheit) %}{% if not einheit %}{{ wert }}{% else %}{{ formatiere(wert, einheit) }}{% endif %}{% endmacro %}
+
+{# ----------  Periode einer Zeile, so kurz wie der Takt es zulässt  ------- #}
+{% macro periode(p, takt) %}
+  {%- set t = takt.value -%}
+  {%- if t == 'monatlich' -%}{{ p.start.strftime('%m.%Y') }}
+  {%- elif t == 'jaehrlich' -%}{{ p.start.strftime('%Y') }}
+  {%- elif t == 'quartalsweise' -%}Q{{ (p.start.month + 2) // 3 }} {{ p.start.strftime('%Y') }}
+  {%- elif p.ende == p.start -%}{{ p.start.strftime('%d.%m.%Y') }}
+  {%- else -%}{{ p.start.strftime('%d.%m.%y') }}–{{ p.ende.strftime('%d.%m.%y') }}
+  {%- endif -%}
+{% endmacro %}
+
+{# ----------  Ampel  -----------------------------------------------------
+   Die Richtung entscheidet die ART der Reihe, nicht das Vorzeichen: eine
+   Prämie, die um 8 % steigt, ist schlecht; ein Altersguthaben, das um 8 %
+   steigt, ist gut. Darum `gut_wenn_steigt` als Argument und keine Regel
+   „positiv = grün". #}
+{% macro ampel(pct, gut_wenn_steigt, nachsatz) %}
+  {%- if pct is none -%}
+    <span class="trend trend-flat">◆ —</span>
+  {%- else -%}
+    {%- set klasse = 'trend-flat' if pct == 0 else ('trend-good' if (pct > 0) == gut_wenn_steigt else 'trend-bad') -%}
+    <span class="trend {{ klasse }}">{{ '▲' if pct > 0 else ('▼' if pct < 0 else '◆') }} {{ pct | abs }}%</span>
+  {%- endif -%}
+  {%- if nachsatz %} <span class="trend-note">{{ nachsatz }}</span>{% endif -%}
+{% endmacro %}
+
+{# ----------  Werteachse  ------------------------------------------------
+   `marken` ist eine Liste (Höhe in Prozent, fertiger Text). Die sichtbaren
+   Beschriftungen sind absolut positioniert, weil nur so eine Prozentangabe die
+   Höhe treffen kann — absolut positionierte Kinder tragen aber NICHTS zur
+   Breite ihres Kastens bei, und die Rasterspalte fiele damit auf 0 zusammen:
+   die Zahlen ragten links aus der Karte heraus (nachgemessen: 61–82 px). Die
+   unsichtbare Kopie im normalen Fluss gibt der Spalte ihre Breite. Sie kommt
+   aus derselben Liste, kann also nicht auseinanderlaufen. #}
+{% macro yachse(marken, klasse) %}
+  <div class="vl-yachse {{ klasse }}">
+    <span class="vl-mass" aria-hidden="true">{% for m in marken %}<i>{{ m[1] }}</i>{% endfor %}</span>
+    {% for m in marken %}<span class="vl-marke" style="bottom:{{ m[0] }}%">{{ m[1] }}</span>{% endfor %}
+  </div>
+{% endmacro %}
+
+{# ----------  Verlaufsdiagramm  ------------------------------------------
+
+   ZEIT AUF DER X-ACHSE, nicht der Index. Die Reihen sind absichtlich ungleich
+   getaktet (monatlich bis unregelmässig, mit Lücken). Über den Index gezeichnet
+   sähe eine Jahreslücke aus wie ein Monatsschritt — das Diagramm behauptete
+   dann eine Gleichmässigkeit, die es nicht gibt.
+
+   WARUM DIE BESCHRIFTUNG HTML IST UND NICHT <text> IM SVG: Die Schriftgrösse
+   im SVG zählt in viewBox-Einheiten und skaliert mit der Kartenbreite mit — am
+   Handy (~380 px Karte) unlesbar klein, auf der breiten Karte am PC doppelt zu
+   gross. Und Text, der über den viewBox-Rand hinausragt, wird abgeschnitten;
+   genau das war beim Sankey rechts und bei den Treemap-Kacheln schon zweimal
+   gemeldet. Ausserhalb des SVG kann das strukturell nicht passieren: die
+   Achsenbeschriftung steht in eigenen Rasterspalten und schiebt das
+   Zeichenfeld zur Seite, statt es zu überlagern.
+   Im SVG bleiben nur Linien — `vector-effect="non-scaling-stroke"` hält sie
+   trotz `preserveAspectRatio="none"` überall gleich dick. Die Messpunkte sind
+   ebenfalls HTML: ein <circle> würde bei nicht-proportionaler Skalierung zur
+   Ellipse, ein <span> bleibt rund und kann nebenbei einen Tooltip tragen. #}
+{% macro diagramm(v, farbe) %}
+  {% set p0 = v.punkte | first %}
+  {% set pN = v.punkte | last %}
+  {# Die Achse endet HEUTE, nicht am letzten Wert. Sonst sieht eine Reihe, deren
+     juengster Eintrag von 2023 stammt, genauso aktuell aus wie eine von
+     gestern: die Kurve lief in beiden Faellen bis zum rechten Rand. Der leere
+     Raum rechts IST die Aussage. #}
+  {% set achsen_ende = zeit_bis_heute(pN.start, heute) %}
+  {% set tage = (achsen_ende - p0.start).days %}
+  {% set xmarken = zeit_marken(p0.start, achsen_ende) %}
+
+  {% set p_hi = v.punkte | max(attribute='wert') %}
+  {% set p_lo = v.punkte | min(attribute='wert') %}
+  {# Geometrie rechnet in float — das ist reine Bildschirmarithmetik. Jede
+     ANGEZEIGTE Zahl kommt weiter aus dem Decimal des Punktes. #}
+  {% set hi = p_hi.wert | float %}
+  {% set lo = p_lo.wert | float %}
+  {# Luft über und unter den Extremwerten, damit die oberste Marke nicht auf
+     dem Rahmen klebt. Sind alle Werte gleich (oder gibt es nur einen), fehlt
+     die Spanne ganz — dann eine künstliche, sonst teilt die Skala durch null. #}
+  {% set flach = hi <= lo %}
+  {% set luft = (hi - lo) * 0.14 if not flach else ((hi | abs) * 0.1 + 1) %}
+  {% set boden = lo - luft %}
+  {% set spanne = (hi - lo) + 2 * luft %}
+  {% set y_hi = ((hi - boden) / spanne * 100) | round(2) %}
+  {% set y_lo = ((lo - boden) / spanne * 100) | round(2) %}
+
+  {# Skaliert auf die EIGENE Spanne der Reihe, nicht ab null: bei einer Prämie
+     von 342 auf 371 wäre der Verlauf ab null eine waagrechte Linie. Die
+     tatsächlichen Zahlen stehen an der Achse, die Aussage bleibt ehrlich. #}
+  {% set ns = namespace(koord=[], neben=[]) %}
+  {% for p in v.punkte %}
+    {% set _ = ns.koord.append({
+         'p': p,
+         'x': (50.0 if tage == 0 else (p.start - p0.start).days / tage * 100) | round(2),
+         'y': (((p.wert | float) - boden) / spanne * 100) | round(2)}) %}
+  {% endfor %}
+
+  {# Nebenwert (Strom: kWh neben CHF) auf EIGENER Achse — auf der Hauptachse
+     wäre er je nach Grössenordnung eine Linie am Rand oder gar nicht sichtbar. #}
+  {% set nb = v.punkte | rejectattr('neben', 'none') | list %}
+  {% if v.reihe.secondary_key and nb %}
+    {% set n_p_hi = nb | max(attribute='neben') %}
+    {% set n_p_lo = nb | min(attribute='neben') %}
+    {% set n_hi = n_p_hi.neben | float %}
+    {% set n_lo = n_p_lo.neben | float %}
+    {% set n_flach = n_hi <= n_lo %}
+    {% set n_luft = (n_hi - n_lo) * 0.14 if not n_flach else ((n_hi | abs) * 0.1 + 1) %}
+    {% set n_boden = n_lo - n_luft %}
+    {% set n_spanne = (n_hi - n_lo) + 2 * n_luft %}
+    {% for p in nb %}
+      {% set _ = ns.neben.append({
+           'p': p,
+           'x': (50.0 if tage == 0 else (p.start - p0.start).days / tage * 100) | round(2),
+           'y': (((p.neben | float) - n_boden) / n_spanne * 100) | round(2)}) %}
+    {% endfor %}
+  {% endif %}
+
+  <div class="vl-chart{{ ' vl-chart-2' if ns.neben else '' }}" role="img"
+       aria-label="Verlauf {{ v.reihe.name }}: {{ v.punkte | length }} Wert{{ 'e' if v.punkte | length != 1 }} von {{ p0.start.strftime('%m.%Y') }} bis {{ pN.start.strftime('%m.%Y') }}. Alle Zahlen stehen in der Werteliste darunter.">
+
+    {# Bei einer flachen Reihe (ein Punkt, oder lauter gleiche Werte) bleibt es
+       bei EINER Marke: drei Beschriftungen lägen sonst deckungsgleich
+       übereinander und behaupteten eine Spanne, die es nicht gibt. #}
+    {% set marken = [(50, achsen_text(p_hi.wert, v.reihe.unit))] if flach else
+                    [(y_hi, achsen_text(p_hi.wert, v.reihe.unit)),
+                     (50, achsen_text((p_hi.wert + p_lo.wert) / 2, v.reihe.unit)),
+                     (y_lo, achsen_text(p_lo.wert, v.reihe.unit))] %}
+    {{ yachse(marken, '') }}
+
+    <div class="vl-plot">
+      <svg class="vl-linien" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+        {% if not flach %}
+          <line class="vl-gitter" x1="0" y1="{{ (100 - y_hi) | round(2) }}" x2="100" y2="{{ (100 - y_hi) | round(2) }}"/>
+          <line class="vl-gitter" x1="0" y1="{{ (100 - y_lo) | round(2) }}" x2="100" y2="{{ (100 - y_lo) | round(2) }}"/>
+        {% endif %}
+        <line class="vl-gitter vl-gitter-mitte" x1="0" y1="50" x2="100" y2="50"/>
+        {# Weiche Kurve statt Polygonzug — dieselbe Glättung wie bei den
+           Sparklines auf Übersicht und Konten, damit die Seite nicht aus zwei
+           verschiedenen Diagrammsprachen besteht. Die y-Werte werden hier schon
+           auf SVG-Richtung gedreht (y wächst nach unten), damit `kurve` nur noch
+           rundet und nichts über die Darstellung wissen muss. #}
+        {% set ns_svg = namespace(haupt=[], neben=[]) %}
+        {% for k in ns.koord %}
+          {% set _ = ns_svg.haupt.append({'x': k.x, 'y': (100 - k.y) | round(2)}) %}
+        {% endfor %}
+        {% for k in ns.neben %}
+          {% set _ = ns_svg.neben.append({'x': k.x, 'y': (100 - k.y) | round(2)}) %}
+        {% endfor %}
+        {% if ns.neben %}
+          <path class="vl-linie vl-linie-neben" stroke="var(--chart-2)" fill="none"
+                d="{{ kurve(ns_svg.neben) }}"/>
+        {% endif %}
+        <path class="vl-linie" stroke="{{ farbe }}" fill="none" d="{{ kurve(ns_svg.haupt) }}"/>
+      </svg>
+
+      {% for k in ns.neben %}
+        <span class="vl-pkt vl-pkt-neben" style="left:{{ k.x }}%;bottom:{{ k.y }}%"
+              title="{{ periode(k.p, v.reihe.cadence) }} · {{ wert_text(k.p.neben, v.reihe.secondary_unit) }}"></span>
+      {% endfor %}
+
+      {# Herkunft ist am Punkt selbst ablesbar: gefüllt = aus einem Beleg,
+         hohl = von Hand getippt, gestrichelt-gelb = aus dem Import und noch
+         nicht bestätigt. Ohne diese Unterscheidung sieht ein geschätzter Wert
+         aus wie ein abgelesener. #}
+      {% for k in ns.koord %}
+        {% set unsicher = k.p.extras.get('unsicher') %}
+        <span class="vl-pkt{{ ' vl-pkt-unsicher' if unsicher else (' vl-pkt-hand' if not k.p.quelle else '') }}{{ ' vl-pkt-jetzt' if loop.last else '' }}" style="left:{{ k.x }}%;bottom:{{ k.y }}%;--vl-farbe:{{ farbe }}" title="{{ periode(k.p, v.reihe.cadence) }} · {{ wert_text(k.p.wert, v.reihe.unit) }} · {{ 'unbestätigt aus ' ~ k.p.quelle if unsicher else (k.p.quelle or 'von Hand') }}"></span>
+      {% endfor %}
+    </div>
+
+    {% if ns.neben %}
+      {% set n_marken = [(50, achsen_text(n_p_hi.neben, v.reihe.secondary_unit))] if n_flach else
+                        [(((n_hi - n_boden) / n_spanne * 100) | round(2), achsen_text(n_p_hi.neben, v.reihe.secondary_unit)),
+                         (((n_lo - n_boden) / n_spanne * 100) | round(2), achsen_text(n_p_lo.neben, v.reihe.secondary_unit))] %}
+      {{ yachse(n_marken, 'vl-yachse-2') }}
+    {% endif %}
+
+    {# Marken auf RUNDEN Daten, nicht auf den Werten: ein Raster, das sich nach
+       den Werten richtet, verschiebt sich mit jedem neuen Wert. Position in
+       Prozent, damit sie ueber demselben Punkt der Zeitachse sitzen wie die
+       Kurve darueber — bei ungleichem Takt liegt sonst „Mitte der Achse" und
+       „Mitte der Werte" auseinander. Die Randmarken werden nach innen
+       gezogen, sonst haengt die erste links und die letzte rechts hinaus. #}
+    <div class="vl-xachse">
+      {% for m in xmarken %}
+        <span style="--vx-links:{{ m.x }}%;--vx-schub:{{ '0' if m.x <= 0 else ('-100%' if m.x >= 100 else '-50%') }}">{{ m.text }}</span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="vl-legende">
+    <span><i class="vl-key" style="background:{{ farbe }}"></i>{{ EINHEIT.get(v.reihe.unit.value, v.reihe.unit.value) }}</span>
+    {% if ns.neben %}
+      <span><i class="vl-key vl-key-neben"></i>{{ v.reihe.secondary_label or v.reihe.secondary_key }}
+        {%- if nb | length < v.punkte | length %} <span class="muted">(nicht bei jedem Wert erfasst)</span>{% endif %}</span>
+    {% endif %}
+    {% if v.punkte | rejectattr('quelle') | list %}
+      <span><i class="vl-key vl-key-hand"></i>von Hand</span>
+    {% endif %}
+    {% if v.punkte | selectattr('extras.unsicher') | list %}
+      <span><i class="vl-key vl-key-unsicher"></i>unbestätigt</span>
+    {% endif %}
+  </div>
+{% endmacro %}
+
+{# ----------  Verlauf mit Positionen: gestapelte Balken  ------------------
+
+   Statt der Linie, sobald eine Reihe ihre Punkte nach Positionen aufschlüsselt
+   (``services/verlauf_positionen.py`` — dort steht die ganze Geometrie samt
+   Begründung). Der Rechnungsbetrag allein sagt nicht, WARUM er steigt: eine
+   ausgelaufene Promotion sieht darin aus wie ein teureres Abo oder ein einmalig
+   gekauftes Gerät.
+
+   DIESELBEN ZWEI REGELN WIE BEI DER STEUER-ÜBERSICHT, aus denselben Gründen:
+
+   * Das Spaltenraster hat KEINEN Spalt. Nur bei lückenlosen Spalten liegt die
+     Mitte der i-ten Spalte bei (i+0.5)/n — und genau dort setzt der Dienst die
+     Punkte der Bezahlt-Linie. Der Abstand zwischen den Balken kommt aus deren
+     Breite, nicht aus einem `gap`.
+   * Beschriftung ausserhalb des SVG. Text im SVG zählt in viewBox-Einheiten,
+     skaliert mit der Kartenbreite mit und wird am viewBox-Rand abgeschnitten.
+
+   Die Bezahlt-Linie hat GERADE Segmente und keine Glättung: zwischen zwei
+   Rechnungen gibt es keine Zwischenwerte, eine Kurve behauptete welche. #}
+{% macro balken_diagramm(v, bild) %}
+  {% set erster = bild.balken | first %}
+  {% set letzter = bild.balken | last %}
+  {# Die Marke auf der Bezahlt-Linie gehoert auf den letzten Balken MIT Wert:
+     seit die Achse bis heute reicht, ist der letzte oft eine leere Periode. #}
+  {% set letzter_wert = bild.letzter_wert %}
+  <div class="vb-chart"
+       style="--vb-n:{{ bild.balken | length }};--vb-oben:{{ bild.anteil_oben / 100 }};--vb-unten:{{ (100 - bild.anteil_oben) / 100 }}">
+
+    {# Die Achsenzahl ist der DECKEL und nicht der Höchstwert der Reihe: ein
+       einmaliger Gerätekauf presste sonst jeden laufenden Monat auf einen
+       Strich. Was darüber liegt, steht als Zeile unter dem Bild.
+
+       Steht über der Nulllinie nichts (eine Rechnung aus lauter Gutschriften),
+       entfällt die obere Zahl: dort stünde eine zweite „0" auf der ersten. #}
+    <div class="vb-yachse{{ ' vb-yachse-null' if not bild.zeigt_oben }}">
+      {% if bild.zeigt_oben %}
+        <span>{{ achsen_text(bild.deckel, v.reihe.unit) }}</span>
+      {% endif %}
+      <span>0</span>
+    </div>
+    {% if bild.zeigt_rabatt %}
+      {# Das Minus gehört an die Achse und nicht nur in die Legende: der Balken
+         zeigt nach unten, die Zahl daneben muss dasselbe sagen. #}
+      <div class="vb-yachse vb-yachse-u">
+        <span style="--vb-tiefe:{{ bild.marke_unten }}%">−{{ achsen_text(bild.deckel_unten, v.reihe.unit) }}</span>
+      </div>
+    {% endif %}
+
+    {# data-monate trägt je Periode Beschriftung und fertig formatierte Beträge —
+       daraus baut app.js Führungslinie und Werte-Kasten. #}
+    <div class="vb-canvas" data-monate='{{ bild.als_json() | tojson }}'
+         role="img"
+         aria-label="Verlauf {{ v.reihe.name }} nach Positionen: {{ bild.balken | length }} Periode{{ 'n' if bild.balken | length != 1 }} von {{ erster.label }} bis {{ letzter.label }}. Alle Zahlen stehen in der Werteliste darunter.">
+      <div class="vb-plot">
+        {% for b in bild.balken %}
+          <div class="vb-spalte" style="grid-column:{{ loop.index }}">
+            <span class="vb-feld">
+              {% if b.offen %}
+                {# Wert bekannt, Zusammensetzung nicht (von Hand nachgetragen).
+                   Offen gezeichnet statt gefüllt: ein gefülltes Band behauptete
+                   eine Position, die niemand kennt. #}
+                <span class="vb-stapel vb-stapel-offen{{ ' is-gekappt' if b.gekappt }}" style="height:{{ b.h_oben }}%"></span>
+              {% else %}
+                {# `is-gekappt` zackt die Kante auf: der Balken reicht über die
+                   Achse hinaus, und eine glatte Kante an der Decke behauptete
+                   eine Höhe, die er nicht hat. Was fehlt, steht benannt unter
+                   dem Bild. #}
+                <span class="vb-stapel{{ ' is-unsicher' if b.unsicher }}{{ ' is-gekappt' if b.gekappt }}" style="height:{{ b.h_oben }}%">
+                  {% for s in b.oben %}
+                    <span class="vb-seg" style="height:{{ s.anteil }}%;background:{{ s.farbe }}"></span>
+                  {% endfor %}
+                </span>
+              {% endif %}
+            </span>
+            {% if bild.zeigt_rabatt %}
+              <span class="vb-feld vb-feld-u">
+                <span class="vb-stapel vb-stapel-u{{ ' is-gekappt' if b.gekappt_unten }}" style="height:{{ b.h_unten }}%">
+                  {% for s in b.unten %}
+                    <span class="vb-seg vb-seg-rabatt" style="height:{{ s.anteil }}%;background:{{ s.farbe }}"></span>
+                  {% endfor %}
+                </span>
+              </span>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+
+      {# Die Linie liegt über den Balken und nimmt keine Zeigerereignisse an —
+         die trifft das Zeichenfeld darunter. #}
+      <div class="vb-linienfeld" aria-hidden="true">
+        <svg class="vb-linien" viewBox="0 0 100 100" preserveAspectRatio="none" focusable="false">
+          {# Kontur in Kartenfarbe unter der Linie: sie läuft über farbige
+             Balken, und ohne den Saum verschwände sie dort, wo ein Band
+             zufällig ähnlich hell ist. Derselbe Kniff wie bei der Gesamtlinie
+             des Vermögens-Verlaufs. #}
+          <path class="vb-kontur" d="{{ bild.pfad }}" fill="none"/>
+          <path class="vb-bezahlt" d="{{ bild.pfad }}" fill="none"/>
+        </svg>
+        {# Als HTML und nicht als <circle>: das viewBox-Quadrat wird auf die
+           Kartenbreite gezerrt, ein Kreis darin wäre eine Ellipse. #}
+        {# `is-aus`: der bezahlte Betrag liegt ausserhalb der Achse, die Marke
+           sitzt geklemmt am Rand. Ohne das Zeichen behauptete die Linie dort
+           genau den Wert des Randes — auf der Nulllinie also „null bezahlt".
+           Darum trägt JEDE geklemmte Periode eine Marke und nicht nur die
+           letzte; ihr Betrag steht in der Zeile unter dem Bild. #}
+        {% for b in bild.balken if b.y_aus and not b.leer and b is not sameas letzter_wert %}
+          <span class="vb-pkt is-aus" style="left:{{ b.x }}%;top:{{ b.y }}%"></span>
+        {% endfor %}
+        {% if letzter_wert %}
+          <span class="vb-pkt{{ ' is-aus' if letzter_wert.y_aus }}" style="left:{{ letzter_wert.x }}%;top:{{ letzter_wert.y }}%"></span>
+        {% endif %}
+        <span class="vb-pkt vb-pkt-hover" hidden></span>
+      </div>
+      <span class="vb-guide" hidden aria-hidden="true"></span>
+
+      {# Werte-Kasten: eine Zeile je Positionsname, der in dieser Reihe
+         überhaupt vorkommt — auch die, die im Balken unter „Übrige" laufen. Die
+         Namen stehen fertig im Markup, app.js schreibt nur die Beträge und
+         blendet ein, was die Periode trägt. Ein im Browser zusammengesetzter
+         Name wäre Text aus einer PDF, der als HTML in die Seite ginge. #}
+      <div class="vb-tip" hidden aria-hidden="true">
+        <div class="vb-tip-monat"></div>
+        {# `data-pos` ist ein fortlaufender Schlüssel und NICHT der Name: eine
+           Position, die zufällig „Rundung" heisst, teilte sich sonst Zeile und
+           Betrag mit der ausgewiesenen Rundungsdifferenz. #}
+        {% for p in bild.zeilen_vorlage %}
+          <div class="vb-tip-zeile" data-pos="{{ p.schluessel }}" hidden>
+            <span class="vb-tip-name" title="{{ p.name }}"><i class="vb-key{{ ' vb-key-rabatt' if p.nur_rabatt }}" style="background:{{ p.farbe }}"></i>{{ p.name }}</span>
+            <span class="vb-tip-wert mono"></span>
+          </div>
+        {% endfor %}
+        <div class="vb-tip-zeile vb-tip-summe" data-pos="">
+          <span class="vb-tip-name">bezahlt</span>
+          <span class="vb-tip-wert mono"></span>
+        </div>
+      </div>
+    </div>
+
+    {# Bis zu fünf Marken statt zwei, gleichmässig über die Balken verteilt —
+       vierundzwanzig nebeneinander wären auf 375px übereinanderliegende
+       Zeichen, zwei liessen dazwischen zwei Jahre unbeschriftet. Welcher Balken
+       welche Periode trägt, sagt weiterhin auch der Werte-Kasten. #}
+    <div class="vb-xachse">
+      {% for x, text in bild.xmarken %}
+        <span style="--vx-links:{{ x }}%;--vx-schub:{{ '0' if x <= 6 else ('-100%' if x >= 94 else '-50%') }}">{{ text }}</span>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# Was über die Achse hinausreicht, wird BENANNT statt gezeichnet: mit dem
+     Positionsnamen, wie der Parser ihn von der Rechnung liest, und dem Betrag.
+     Ohne diese Stelle bliebe von einem Gerätekauf nur eine aufgezackte Kante.
+
+     AUFSTELLUNG UND NICHT SATZ. Vorher stand hier ein Fliesstext, der bei 375px
+     über drei Zeilen lief (gemessen 72px); die Hälfte davon waren „über der
+     Achse:" und „unter der Achse:" — Konstruktionswörter, die keinen Posten und
+     keinen Betrag benennen. Beide sagen nichts, was nicht schon am Betrag steht:
+     ein Rabatt trägt sein echtes Minus (U+2212), genau wie im Werte-Kasten. Also
+     dieselbe Form wie dort — Name links, Betrag rechts, eine Zeile je Posten.
+     Der INHALT ist unverändert: jeder Name, jeder Betrag, jede Periode.
+
+     Das Wort „abgeschnitten" steht einmal über der Aufstellung, mit derselben
+     Zackenmarke wie die Balkenkante. In der Legende ist es deshalb gestrichen:
+     dort erklärte es ein Zeichen, das nur hier vorkommt. #}
+  {# ZUGEKLAPPT, wie die Legende darunter. Gemessen bei 375px: die Aufstellung
+     ist 120px hoch für EINEN Ausnahmemonat und stand zwischen Bild und Legende
+     — die Karte kam damit auf 799px, wovon 172px das Diagramm waren. Dass
+     gekappt wurde, sagt schon die Zackenkante am Balken; die Aufstellung ist
+     die Antwort auf „was war da los", und die stellt man erst, wenn man den
+     Zacken sieht. Der Monat steht in der Zusammenfassung, damit man ihn ohne
+     Aufklappen zuordnen kann. #}
+  {% if bild.kappungen %}
+    <details class="disclosure vb-kappung">
+      <summary class="vb-kappung-kopf"><i class="vb-key vb-key-schnitt"></i>abgeschnitten ·
+        {{ bild.kappungen | map(attribute='label') | join(', ') }}</summary>
+      {% for k in bild.kappungen %}
+        <div class="vb-kappung-block">
+          <div class="vb-kappung-periode">{{ k.label }}</div>
+          {% for name, betrag in k.posten + k.posten_unten %}
+            <div class="vb-kappung-zeile">
+              <span class="vb-kappung-name">{{ name }}</span>
+              <span class="mono">{{ betrag }}</span>
+            </div>
+          {% endfor %}
+          {% if k.bezahlt %}
+            <div class="vb-kappung-zeile vb-kappung-summe">
+              <span class="vb-kappung-name">bezahlt</span>
+              <span class="mono">{{ k.bezahlt }}</span>
+            </div>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </details>
+  {% endif %}
+
+  {# LEGENDE ZUGEKLAPPT — anders als beim Linien-Diagramm, das mit höchstens vier
+     Einträgen eine Zeile braucht. Hier ist es eine je Position: bei 375px acht
+     Zeilen über 182px, unter einem Zeichenfeld von 172px. Die Legende war damit
+     höher als das Bild, das sie erklärt.
+
+     Sie beantwortet dazu eine Frage, die auf dieser Karte schon zweimal
+     beantwortet ist: der Werte-Kasten zeigt beim Antippen eines Balkens
+     dieselbe Farbmarke mit Namen UND Betrag, die Werteliste dieselben Zeilen
+     ohne Zeigegerät. Erreichbar muss die Zuordnung bleiben — dauerhaft im Weg
+     stehen muss sie nicht.
+
+     Die Zahl im Aufklapper ist die Aussage: wie viele Posten diese Rechnung
+     überhaupt kennt. Zugeklappt bleibt davon eine Zeile statt acht. #}
+  {# OFFEN. Die Begruendung darueber (acht Zeilen ueber 182px unter einem
+     Zeichenfeld von 172px) stimmt weiter — sie wog nur falsch. Der Werte-Kasten
+     beim Antippen setzt ein Zeigegeraet und einen Treffer voraus; wer den Chart
+     ueberfliegt, will wissen, welche Farbe welcher Posten ist, ohne erst etwas
+     zu treffen. Genau das war der Wunsch: Legende ZUSAETZLICH zum Hover.
+     Zuklappen bleibt moeglich, der Zustand ist also nicht verloren. #}
+  <details class="disclosure vb-legende-box" open>
+    <summary>Legende · {{ bild.posten | length }} Posten</summary>
+    <div class="vl-legende vb-legende">
+      {% for p in bild.posten %}
+        <span><i class="vb-key{{ ' vb-key-rabatt' if p.nur_rabatt }}" style="background:{{ p.farbe }}"></i>{{ p.name }}</span>
+      {% endfor %}
+      <span><i class="vb-key vb-key-linie"></i>bezahlt</span>
+      {% if bild.zeigt_rabatt %}
+        <span><i class="vb-key vb-key-rabatt vb-key-muster"></i>Rabatt, wird abgezogen</span>
+      {% endif %}
+      {% if bild.hat_offene %}
+        <span><i class="vb-key vb-key-offen"></i>ohne Aufschlüsselung</span>
+      {% endif %}
+      {% if bild.hat_unsichere %}
+        <span><i class="vl-key vl-key-unsicher"></i>unbestätigt</span>
+      {% endif %}
+    </div>
+  </details>
+{% endmacro %}
+
+{# ----------  Soll aus dem Beleg gegen Ist aus den Buchungen  -------------
+   Der eigentliche Zweck der Verknüpfung Reihe→Kategorie. Drei Fragen, in der
+   Reihenfolge, in der sie Geld kosten: ist die Zahlung gebucht, stimmt der
+   Betrag, und steht im Fixposten noch der alte Wert?
+
+   „Kein Abgleich" wird ausgeschrieben statt weggelassen: eine leere Stelle
+   sähe aus wie „alles in Ordnung". Beim Lohn ist der fehlende Abgleich Absicht
+   (der Ausweis nennt brutto, gebucht wird netto) — das muss dastehen.
+
+   BEFUND OBEN, HANDLUNG UNTEN. Vorher stand hier „28 nicht gebucht · 26 weichen
+   ab · kein Fixposten · [+ Fixposten anlegen]" — alle vier Teile richtig, keiner
+   davon beantwortete „und jetzt?". Gemeldeter Befund vom 05.08.2026. Geändert
+   ist deshalb nicht die Menge an Text, sondern was er benennt:
+
+   * die ZÄHLEINHEIT („28 Monate" statt „28"), damit klar ist, worüber gezählt
+     wird — der Takt der Reihe liefert das Wort;
+   * die FOLGE im `title` (warum es zählt), nicht in einem Absatz auf der Seite;
+   * die WIRKUNG im Knopf („CHF 449.20 monatlich ins Budget") statt des
+     Fachworts („Fixposten anlegen"), das genau die Frage war.
+
+   Die Knöpfe stehen in einer eigenen Zeile unter den Befunden. Nebeneinander
+   waren sie bei drei Befunden gleichzeitig nicht mehr als Handlung erkennbar. #}
+{% macro abgleich_zeile(a) %}
+  {%- if a is none -%}
+  {%- elif not a.geprueft -%}
+    <p class="vl-abgleich vl-abgleich-aus">Kein Abgleich — {{ a.grund }}</p>
+  {%- else -%}
+    {% set takt = a.reihe.cadence.value %}
+    {% set periode_wort = PERIODEN.get(takt, 'Perioden') %}
+    <div class="vl-abgleich{{ ' vl-abgleich-ok' if a.sauber else ' vl-abgleich-warn' }}">
+      <span class="vl-abgleich-kat">{{ a.kategorie.name }}</span>
+      {% if a.anzahl_fehlend %}
+        {# Die Folge, nicht die Wiederholung: dass nichts gebucht ist, steht
+           schon da — dass die Zahlung anderswo liegen oder fehlen kann, ist
+           der Grund, deswegen nachzusehen. #}
+        <span class="vl-abgleich-bad"
+              title="Belege ohne passende Buchung in „{{ a.kategorie.name }}“ — entweder anders kategorisiert oder gar nicht importiert.">{{ a.anzahl_fehlend }} {{ periode_wort }} ohne Buchung</span>
+      {% endif %}
+      {% if a.anzahl_abweichend %}
+        <span class="vl-abgleich-bad"
+              title="Gebuchter Betrag und Belegwert unterscheiden sich um mehr als {{ wert_text(toleranz, a.reihe.unit) }}.">{{ a.anzahl_abweichend }}× anderer Betrag als im Beleg</span>
+      {% endif %}
+      {% if a.abo and not a.abo.erfasst %}
+        <span class="vl-abgleich-bad"
+              title="Ohne Fixposten rechnet das Budget für diese Ausgabe mit null.">fehlt im Budget</span>
+      {% elif a.abo and a.abo.veraltet %}
+        <span class="vl-abgleich-bad"
+              title="Das Budget rechnet weiter mit dem alten Betrag, der Beleg nennt längst einen neuen.">Budget rechnet mit {{ wert_text(a.abo.hinterlegt, a.reihe.unit) }}, Beleg sagt {{ wert_text(a.abo.erwartet, a.reihe.unit) }}</span>
+      {% endif %}
+      {% if a.sauber %}<span class="vl-abgleich-good">stimmt</span>{% endif %}
+
+      {% if a.anzahl_fehlend or a.anzahl_abweichend or (a.abo and (not a.abo.erfasst or a.abo.veraltet)) %}
+        <div class="vl-tat">
+          {% if a.anzahl_fehlend or a.anzahl_abweichend %}
+            {# Die Handlung zu beiden Zählungen ist dieselbe: nachsehen, was in
+               dieser Kategorie wirklich gebucht ist. `zeitraum=alles`, weil die
+               Reihe Jahre zurückreicht und die Buchungsliste sonst beim
+               laufenden Jahr aufhört — genau die Perioden, um die es geht,
+               fehlten dann. #}
+            <a class="btn btn-ghost btn-sm"
+               href="/transactions?category_id={{ a.kategorie.id }}&amp;zeitraum=alles">Buchungen ansehen</a>
+          {% endif %}
+          {% if a.abo and not a.abo.erfasst %}
+            {# Betrag und Takt stehen IM Knopf: „Fixposten anlegen" war das
+               Fachwort für genau das, was der Knopf dann tut — der Nutzer
+               fragte, was es heisst. Beides ist exakt, was die Route schreibt
+               (`_juengster_wert` + `fixposten_takt`), keine zweite Rechnung.
+               Das <form> mit `action` trägt den Weg ohne JavaScript. #}
+            {% if fixposten_takt(a.reihe) %}
+              <form class="vl-fix" action="/verlaeufe/{{ a.reihe.slug }}/fixposten" method="post"
+                    hx-post="/verlaeufe/{{ a.reihe.slug }}/fixposten"
+                    hx-target="#verlaeufe-root" hx-select="#verlaeufe-root" hx-swap="outerHTML">
+                <button type="submit" class="btn btn-primary btn-sm"
+                        title="Legt einen wiederkehrenden Posten in „{{ a.kategorie.name }}“ an. Das Budget führt ihn danach als geplanten Abgang.">{{ icon('plus') }} {{ wert_text(a.abo.erwartet, a.reihe.unit) }} {{ FIX_TAKT.get(takt, '') }} einplanen</button>
+              </form>
+            {% else %}
+              {# Kein Knopf — und der Hinweis sagt warum, sonst sähe die Stelle
+                 bei Strom nach einem Fehler aus. Quartalsweise und
+                 unregelmässig passen auf kein Budget-Intervall; welchen Betrag
+                 der Posten je Monat tragen soll, entscheidet man dann und
+                 nicht die App. #}
+              <span class="vl-fix-hand"
+                    title="Ein Fixposten läuft monatlich oder jährlich. Diese Reihe kommt {{ TAKT.get(takt, takt) }} — auf welchen Monatsbetrag das umzurechnen ist, entscheidet die App nicht.">{{ TAKT.get(takt, takt) }}, passt auf kein Budget-Intervall —
+                <a href="/subscriptions?form=new">von Hand anlegen</a></span>
+            {% endif %}
+          {% elif a.abo and a.abo.veraltet %}
+            {# Ändert NUR den Betrag; Name und Intervall bleiben. Darum kein
+               hx-confirm: der Knopf nennt den Zielbetrag selbst, die Rückfrage
+               würde nichts hinzufügen, was nicht schon dasteht.
+
+               Dieselbe Schranke wie beim Anlegen-Knopf, und aus demselben
+               Grund: passt der Takt der Reihe auf kein Budget-Intervall, ist
+               auch der zu übernehmende Betrag nicht bestimmt. Ohne die Schranke
+               stand der Knopf bei Strom da und hätte einen Quartalsbetrag in
+               einen monatlichen Posten geschrieben. #}
+            {% if fixposten_takt(a.reihe) %}
+              <form class="vl-fix" action="/verlaeufe/{{ a.reihe.slug }}/fixposten/betrag" method="post"
+                    hx-post="/verlaeufe/{{ a.reihe.slug }}/fixposten/betrag"
+                    hx-target="#verlaeufe-root" hx-select="#verlaeufe-root" hx-swap="outerHTML">
+                <button type="submit" class="btn btn-primary btn-sm"
+                        title="Setzt den Betrag des vorhandenen Fixpostens auf den Belegwert. Name und Intervall bleiben.">{{ icon('check') }} Budget auf {{ wert_text(a.abo.erwartet, a.reihe.unit) }} setzen</button>
+              </form>
+            {% endif %}
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  {%- endif -%}
+{% endmacro %}
+
+{# ----------  Eine Reihe als Karte  --------------------------------------- #}
+{% macro reihen_karte(v) %}
+  {% set r = v.reihe %}
+  {% set farbe = FARBE.get(r.kind.value, 'var(--chart-0)') %}
+  {# Nur Reihen MIT Positionen bekommen Balken. Fehlt der Eintrag, bleibt alles
+     bei der Linie — eine Prämie ohne Aufschlüsselung soll sich nicht ändern,
+     nur weil eine andere Reihe jetzt Balken kann. #}
+  {% set bild = positions_bilder.get(r.slug) %}
+  {% set stapel = bild.nach_punkt if bild else {} %}
+  {# Ausgabe: mehr ist schlecht. Einnahme und Vermögen: mehr ist gut. #}
+  {% set gut_wenn_steigt = r.kind.value != 'ausgabe' %}
+  {% set fv = form_values if (form_slug == r.slug and form_values) else {} %}
+
+  <article class="card vl-karte">
+    {# KEINE REIHENBESCHREIBUNG UNTER DEM NAMEN. Sie stand dauerhaft zwischen
+       Überschrift und Leitzahl und schob diese bei 375px von 85px auf 124px
+       hinunter — bei den längeren Notizen (Vorsorge) auf 229px. Gesagt hat sie
+       dabei, was die Überschrift schon sagt („Anbieter" / „Monatsrechnung mit
+       allen Positionen — Abonnemente, Optionen, Verbindungen und Rabatte"): eine
+       Definition, die man einmal liest und nie wieder.
+
+       Gelöscht ist sie nicht. Ihr Inhalt — woher die Werte stammen — steht jetzt
+       am Kopf der Werteliste, also genau bei den Herkunftsangaben der einzelnen
+       Werte. Solange die Reihe LEER ist, gibt es diese Liste nicht; dort bleibt
+       die Notiz sichtbar, denn dann ist sie das Einzige, was die Reihe
+       beschreibt. #}
+    <header class="vl-kopf">
+      <h2 class="label-cap">{{ r.name }}</h2>
+      <span class="vl-kopf-rechts">
+        <span class="pill">{{ TAKT.get(r.cadence.value, r.cadence.value) }}</span>
+        {# Ausblenden statt löschen: an der Reihe hängen ihre Werte. Wer die App
+           anderswo benutzt, braucht die Schweizer Reihen nicht — und eine leere
+           Reihe klappt ihr Nachtrag-Formular von selbst auf, ist also gerade
+           dann am lautesten, wenn man sie nicht will. #}
+        {# KEINE Rückfrage: das Ausblenden ist umkehrbar, die Werte bleiben, und
+           die Liste zum Zurückholen steht auf derselben Seite. Eine Abfrage für
+           etwas Umkehrbares ist Reibung ohne Gegenwert — anders als beim
+           Löschen eines Messwerts, das eine hat. #}
+        <form action="/verlaeufe/{{ r.slug }}/archiv" method="post"
+              hx-post="/verlaeufe/{{ r.slug }}/archiv"
+              hx-target="#verlaeufe-root" hx-select="#verlaeufe-root" hx-swap="outerHTML">
+          <button type="submit" class="icon-action" title="Reihe ausblenden"
+                  aria-label="Reihe {{ r.name }} ausblenden">{{ icon('archive') }}</button>
+        </form>
+      </span>
+    </header>
+
+    {% if v.leer %}
+      {# Kein leerer Diagrammrahmen: ein Rahmen ohne Linie sieht nach Fehler
+         aus. Stattdessen der Satz, was hier hingehört. Was danach zu tun ist,
+         steht nicht mehr dabei: das Nachtrag-Formular steht bei einer leeren
+         Reihe direkt darunter und AUFGEKLAPPT, seine eigene Zeile heisst
+         „Ersten Wert eintragen". #}
+      <p class="vl-leer">Noch kein Wert erfasst.
+        {{ TAKT_ERWARTET.get(r.cadence.value, '') }}</p>
+      {% if r.note %}<p class="vl-hinweis">{{ r.note }}</p>{% endif %}
+    {% else %}
+      <div class="vl-jetzt">
+        <div class="metric-label">Aktuell · {{ periode(v.aktuell, r.cadence) }}</div>
+        {# Bewusst in der normalen Textfarbe und NICHT in der Reihenfarbe: die
+           --chart-*-Palette ist für Flächen und Linien gemacht und erreicht auf
+           den hellen Skins nur ~2.5:1 — als Text wäre die Leitzahl dort kaum
+           lesbar. Die Zuordnung Zahl→Linie trägt die Legende. #}
+        <div class="metric-value">{{ wert_text(v.aktuell.wert, r.unit) }}</div>
+        <div class="trend-row">
+          {{ ampel(v.aktuell.diff_pct, gut_wenn_steigt, 'zum Vorwert') }}
+          {% if v.gesamt_pct is not none %}
+            {{ ampel(v.gesamt_pct, gut_wenn_steigt, 'seit ' ~ v.erster.start.strftime('%m.%Y')) }}
+          {% else %}
+            <span class="trend-note">erster Wert der Reihe</span>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if bild %}{{ balken_diagramm(v, bild) }}{% else %}{{ diagramm(v, farbe) }}{% endif %}
+
+      {{ abgleich_zeile(abgleiche.get(r.slug)) }}
+
+      <details class="disclosure vl-liste">
+        <summary>Alle Werte ({{ v.punkte | length }})</summary>
+        {# Die Reihenbeschreibung, aus dem Kartenkopf hierher: sie sagt, WOHER
+           die Werte stammen („laut Police", „laut Lohnausweis") — dieselbe
+           Frage, die jede Zeile darunter für sich beantwortet. #}
+        {% if r.note %}<p class="vl-hinweis">{{ r.note }}</p>{% endif %}
+        {% for p in v.punkte | reverse %}
+          <div class="vl-zeile">
+            <span class="vl-zeile-periode">{{ periode(p, r.cadence) }}</span>
+            <span class="mono vl-zeile-wert">{{ wert_text(p.wert, r.unit) }}</span>
+            {{ ampel(p.diff_pct, gut_wenn_steigt, '') }}
+            <form class="vl-zeile-weg" action="/verlaeufe/punkt/{{ p.id }}/delete" method="post"
+                  hx-post="/verlaeufe/punkt/{{ p.id }}/delete"
+                  hx-target="#verlaeufe-root" hx-select="#verlaeufe-root" hx-swap="outerHTML"
+                  hx-confirm="Wert {{ periode(p, r.cadence) }} aus {{ r.name }} löschen?">
+              <button type="submit" class="btn btn-ghost btn-sm" aria-label="Wert löschen"
+                      title="Wert löschen">{{ icon('trash') }}</button>
+            </form>
+            <span class="vl-zeile-quelle">
+              {%- if p.quelle %}{{ icon('receipt') }} {{ p.quelle }}
+              {%- else %}von Hand{% endif -%}
+              {%- if p.extras.get('unsicher') %} · <span class="vl-unbestaetigt">unbestätigt</span>{% endif -%}
+              {%- if p.neben is not none %} · {{ r.secondary_label or r.secondary_key }}
+                {{- ' ' }}{{ wert_text(p.neben, r.secondary_unit) }}{% endif -%}
+              {%- if p.notiz %} · {{ p.notiz }}{% endif -%}
+            </span>
+            {# Die Positionen dieser Periode — dieselben Zeilen wie im
+               Werte-Kasten des Diagramms, aus derselben Quelle. Sie MÜSSEN hier
+               stehen: das Diagramm sagt im aria-label zu, alle Zahlen stünden in
+               dieser Liste. Ohne sie wäre die Zusage falsch, und ohne Zeigegerät
+               gäbe es die Aufschlüsselung nirgends zu lesen. #}
+            {% set b = stapel.get(p.id) %}
+            {% if b and not b.offen %}
+              <span class="vl-zeile-quelle vb-zeile-pos">
+                {%- for z in b.zeilen if z.schluessel -%}
+                  {%- if not loop.first %} · {% endif -%}
+                  {{ z.name }} <span class="mono">{{ z.betrag }}</span>
+                {%- endfor -%}
+              </span>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </details>
+    {% endif %}
+
+    {# Nachtragen: ausdrücklicher Wunsch — künftige Perioden trägt man
+       selbst ein, ohne auf einen Beleg-Import zu warten. Zugeklappt, ausser
+       die Reihe ist noch leer (dann ist es die einzige sinnvolle Handlung)
+       oder genau dieses Formular hat gerade einen Fehler geworfen. #}
+    <details class="disclosure vl-nachtrag" {{ 'open' if (v.leer or form_slug == r.slug) else '' }}>
+      <summary>{{ 'Ersten Wert eintragen' if v.leer else 'Weitere Periode nachtragen' }}</summary>
+      <form class="vl-form" action="/verlaeufe/{{ r.slug }}/punkt" method="post"
+            hx-post="/verlaeufe/{{ r.slug }}/punkt"
+            hx-target="#verlaeufe-root" hx-select="#verlaeufe-root" hx-swap="outerHTML">
+        <div>
+          <label for="vl-{{ r.slug }}-start">Periodenbeginn</label>
+          {# Nur der Beginn wird gefragt; das Ende ergibt sich aus dem Takt
+             (services.metrics.periode_aus_takt). Vorschlag ist der Anfang der
+             laufenden Periode — bei Jahresreihen also der 1. Januar. #}
+          <input id="vl-{{ r.slug }}-start" type="date" name="start" class="full-w" required
+                 value="{{ fv.get('start') or (heute.replace(month=1, day=1) if r.cadence.value == 'jaehrlich' else (heute if r.cadence.value == 'unregelmaessig' else heute.replace(day=1))).strftime('%Y-%m-%d') }}">
+        </div>
+        <div>
+          <label for="vl-{{ r.slug }}-wert">Wert in {{ EINHEIT.get(r.unit.value, r.unit.value) }}</label>
+          <input id="vl-{{ r.slug }}-wert" name="wert" class="full-w" inputmode="decimal" required
+                 placeholder="{{ '342.60' if r.unit.value == 'chf' else ('1240' if r.unit.value == 'kwh' else '1.5') }}"
+                 value="{{ fv.get('wert') or '' }}">
+        </div>
+        {% if r.secondary_key %}
+          <div>
+            <label for="vl-{{ r.slug }}-neben">{{ r.secondary_label or r.secondary_key }} (optional)</label>
+            <input id="vl-{{ r.slug }}-neben" name="neben" class="full-w" inputmode="decimal"
+                   value="{{ fv.get('neben') or '' }}">
+          </div>
+        {% endif %}
+        <div class="vl-form-breit">
+          <label for="vl-{{ r.slug }}-notiz">Notiz (optional)</label>
+          <input id="vl-{{ r.slug }}-notiz" name="notiz" class="full-w"
+                 placeholder="z.B. Prämienabrechnung vom 12.11."
+                 value="{{ fv.get('notiz') or '' }}">
+        </div>
+        <div class="vl-form-fuss">
+          <button type="submit" class="btn btn-primary">Wert eintragen</button>
+          <span class="muted text-sm">Ein bereits erfasster Wert derselben Periode wird ersetzt, nicht verdoppelt.</span>
+        </div>
+      </form>
+    </details>
+  </article>
+{% endmacro %}
+
+
+{% block content %}
+<div class="hero">
+  <div>
+    <h1 class="hero-greeting">Verläufe</h1>
+  </div>
+  <div class="hero-aside"><a class="btn" href="#vl-import">{{ icon('upload') }} Werte importieren</a></div>
+</div>
+
+{# Der Satz bleibt, weil er eine Folge hat: wer ihn nicht kennt, importiert die
+   Prämienabrechnung irgendwann als Belastung und zählt jeden Monat doppelt.
+   Auf eine Erklärung, was ein Verlauf ist, wird verzichtet — das zeigt die
+   Seite selbst. #}
+<div class="card sunken mb-4 vl-warum">
+  {{ icon('receipt', 'cat-icon lg') }}
+  <p>Werte aus Belegen, keine Buchungen. Sie zählen in keiner Monatsbilanz,
+     keinem Budget und keiner Summe mit.</p>
+</div>
+
+<div id="verlaeufe-root">
+  {% if error %}<div class="feedback err mb-4">{{ error }}</div>{% endif %}
+
+  {% if not verlaeufe %}
+    <div class="card">
+      <div class="empty-guide">
+        <p>Noch keine Reihe angelegt. Werte aus einer
+           <span class="mono">verlaeufe.json</span> unten einlesen.</p>
+      </div>
+    </div>
+  {% else %}
+    <div class="grid-main">
+      {% for v in verlaeufe %}{{ reihen_karte(v) }}{% endfor %}
+    </div>
+  {% endif %}
+
+  {% if archivierte %}
+    {# Zugeklappt: wer hier etwas sucht, sucht gezielt. Aufgeklappt stuende eine
+       Liste von Dingen auf dem Schirm, die man ausdruecklich nicht sehen wollte. #}
+    <details class="disclosure mt-4">
+      <summary class="muted text-sm">
+        Ausgeblendete Reihen ({{ archivierte | length }})
+      </summary>
+      <div class="card sunken mt-4">
+        <p class="muted text-sm" style="margin-top:0">
+          Die Werte sind erhalten. Ein Import trägt auch hier weiter ein, damit
+          beim Einblenden keine Lücke klafft.
+        </p>
+        {% for r in archivierte %}
+          <div class="row">
+            <span>{{ r.name }}</span>
+            <form action="/verlaeufe/{{ r.slug }}/archiv" method="post"
+                  hx-post="/verlaeufe/{{ r.slug }}/archiv"
+                  hx-target="#verlaeufe-root" hx-select="#verlaeufe-root" hx-swap="outerHTML">
+              <input type="hidden" name="zurueck" value="1">
+              <button type="submit" class="icon-action" title="Reihe wieder einblenden"
+                      aria-label="Reihe {{ r.name }} wieder einblenden">{{ icon('rotate') }}</button>
+            </form>
+          </div>
+        {% endfor %}
+      </div>
+    </details>
+  {% endif %}
+</div>
+
+{# ----------  Import + Bestätigung unsicherer Werte  ---------------------- #}
+<div class="card mt-4" id="vl-import">
+  <h2 class="label-cap">Werte importieren</h2>
+  {# Kein Werbetext, aber diese eine Regel: sie entscheidet, ob ein zweiter
+     Import eigene Korrekturen überschreibt. #}
+  <p class="card-sub">Schlüssel ist die Periode. Von Hand nachgetragene Werte bleiben.</p>
+
+  <form action="/verlaeufe/import" method="post" enctype="multipart/form-data">
+    <div class="form-grid" style="max-width:none">
+      <div>
+        <label for="vl-datei">Datei</label>
+        <label class="file-field" data-file-field>
+          <input id="vl-datei" name="datei" type="file" accept=".json,application/json" required>
+          <span class="file-field-btn">{{ icon('upload') }} Datei wählen</span>
+          <span class="file-field-name" data-empty="Keine Datei ausgewählt">Keine Datei ausgewählt</span>
+        </label>
+      </div>
+      <button type="submit" class="btn btn-primary">Einlesen</button>
+    </div>
+  </form>
+
+  {% if import_report %}
+    <div class="banner-ok">
+      ✓ {{ import_report.dateiname }} gelesen ·
+      <strong>{{ import_report.neu }}</strong> neu ·
+      {{ import_report.aktualisiert }} aktualisiert ·
+      {{ import_report.uebersprungen }} unverändert
+    </div>
+
+    {% if import_report.fehler %}
+      <div class="feedback err">
+        {% for f in import_report.fehler %}<div>⚠ {{ f }}</div>{% endfor %}
+      </div>
+    {% endif %}
+
+    {% if import_report.unsicher %}
+      {# Bewusst KEIN Sammel-Haken „alle bestätigen": das Anhaken ist hier die
+         Prüfung, nicht das Wegklicken davon. Nicht Bestätigtes verschwindet
+         nicht — es bleibt im Diagramm gestrichelt sichtbar. #}
+      <form action="/verlaeufe/bestaetigen" method="post" class="vl-unsicher">
+        <h3 class="label-cap mt-4">Unsicher gelesen — bestätigen, was stimmt</h3>
+        <p class="card-sub">Nicht Bestätigtes bleibt
+           <span class="vl-unbestaetigt">unbestätigt</span> und steht gestrichelt.</p>
+        {% for u in import_report.unsicher %}
+          <label class="row vl-unsicher-zeile">
+            <span class="flex items-center gap-3" style="min-width:0">
+              <input type="checkbox" name="punkt_id" value="{{ u.punkt_id }}">
+              <span style="min-width:0">{{ u.reihe }}
+                <span class="muted text-sm">· {{ u.periode }}{% if u.quelle %} · {{ u.quelle }}{% endif %}{% if u.grund %} · {{ u.grund }}{% endif %}</span>
+              </span>
+            </span>
+            <span class="mono">{{ u.wert }}</span>
+          </label>
+        {% endfor %}
+        <button type="submit" class="btn btn-primary mt-4">Angehakte bestätigen</button>
+      </form>
+    {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

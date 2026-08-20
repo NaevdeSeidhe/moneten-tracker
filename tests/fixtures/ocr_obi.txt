@@ -1,0 +1,14 @@
+OBI Baumarkt
+
+Musterstrasse 12
+0000 Musterhausen
+
+0000000000001  Blumenerde 20L            8.95
+0000000000002  Pflanzstab 120CM          2.50
+0000000000003  Bindedraht Gruen          4.20
+
+Summe                                   15.65
+Gegeben Karte                           15.65
+
+12.03.2026 10:15
+CHE-000.000.000 MWST

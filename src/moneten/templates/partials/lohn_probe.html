@@ -1,0 +1,28 @@
+{# Mitlaufende Gegenprobe des Lohn-Editors — die Antwort auf POST .../lohn/probe.
+
+   Sie rechnet NICHT im Browser. Sie geht durch dieselbe Prüfung und dieselbe
+   Aufstellung wie das Speichern (`_lohn_rows_geprueft`, `aufstellung_aus_posten`)
+   und zeigt dieselben Zeilen wie der Aufklapper an der Buchung
+   (partials/lohn_ergebnis.html). Damit kann die Vorschau nichts behaupten, was
+   der Server danach nicht täte — vorher rechnete sie im Browser nach eigenen
+   Regeln und zeigte für abgelehnte Eingaben ein Ergebnis, das es nie gab.
+
+   Erwartet ``a`` (Aufstellung oder None), ``lohn_hinweis``, ``lohn_marken``. #}
+{% if lohn_hinweis %}
+  <p class="lohn-hinweis">{{ lohn_hinweis }}</p>
+{% elif a %}
+  {% include "partials/lohn_ergebnis.html" %}
+  {% if a.legende %}
+    <div class="lohn-fuss"><span class="lohn-legende">{{ a.legende | join(" · ") }}</span></div>
+  {% endif %}
+{% endif %}
+{# Die Marke neben jedem Betragsfeld, das nicht vom Blatt DIESES Monats stammt —
+   als Out-of-Band-Tausch, weil sie nicht hier steht, sondern oben in der Zeile.
+   Ohne sie trug allein die Summe ein Zeichen, und die sieben übernommenen
+   Beträge darüber sahen aus wie getippte Zahlen; die Legende versprach damit
+   mehr, als sie kennzeichnete. Welches Zeichen eine Zeile trägt, entscheidet
+   `herkunft_nach_aenderung` — dieselbe Funktion wie beim Speichern. #}
+{% for schluessel, marke, erklaerung in lohn_marken %}
+<span id="lohn-marke-{{ schluessel }}" class="lohn-marke" hx-swap-oob="true"
+      {% if marke %}title="{{ erklaerung }}"{% endif %}>{{ marke }}</span>
+{% endfor %}

@@ -1,0 +1,87 @@
+{# Aufklappbare Lohnzusammensetzung an EINER Buchungszeile.
+
+   Erwartet ``a`` = services.lohn.Aufstellung, ``tx`` = die Buchung und
+   ``lohn_proben`` = {Jahr: services.lohn.Jahresprobe}. Eingebunden aus
+   tx_months.html, als Gitterfeld „lohn" der Zeile (die Zeile trägt dann
+   .hat-lohn).
+
+   Aufbau wie eine Abrechnung auf Papier und nicht als Aufzählung: eine
+   beschriftete Summenzeile je Gruppe, die Einzelposten eingerückt darunter,
+   ein Strich, darunter das Ergebnis und daneben, was wirklich aufs Konto kam.
+   Die Gegenüberstellung ist der Punkt — der gerechnete Nettolohn und der
+   gebuchte Betrag stehen untereinander, und was dazwischen fehlt, steht als
+   Differenz da, statt weggerechnet zu werden.
+
+   Jede Zahl, die nicht auf dem Blatt DIESES Monats steht, trägt ihr Zeichen:
+   „=" für unverändert aus einem früheren Monat, „≈" für aus einem Jahreswert
+   oder Beitragssatz gerechnet (``services.lohn.MARKE``). Ohne die Zeichen sähe
+   eine Schätzung aus wie eine Ablesung; mit nur EINEM Zeichen für beides sähe
+   der Normalfall — ein Monat zwischen zwei Lohnänderungen — nach Schätzung aus.
+   Erklärt werden sie einmal im Fuss, nicht je Zeile. #}
+<details class="lohn">
+  <summary class="lohn-kopf">
+    <span class="lohn-kopf-titel">Zusammensetzung</span>
+    <span class="lohn-kopf-zahl">{% if a.brutto_marke %}<span class="lohn-marke">{{ a.brutto_marke }}</span> {% endif %}{{ a.brutto | chf_wert }} brutto</span>
+  </summary>
+  {# Bei GENAU EINEM Posten je Gruppe traegt die Summenzeile dessen eigene
+     Bezeichnung, und die Einzelzeile entfaellt. Sonst passierte je nach Seite
+     einer von zwei Fehlern: beim Brutto verschwand die Beschriftung des Nutzers
+     („Monatslohn brutto (80% Pensum)" — die traegt das Pensum!), bei den
+     Abzuegen stand dieselbe Zahl zweimal untereinander. #}
+  {% set b_einzeln = a.brutto_zeilen | length == 1 %}
+  {% set z_einzeln = a.abzug_zeilen | length == 1 %}
+  <div class="lohn-blatt">
+    <div class="lohn-summenzeile">
+      <span class="lohn-was">{{ a.brutto_zeilen[0].label if b_einzeln else "Bruttolohn" }}</span>
+      <span class="lohn-betrag">{% if a.brutto_marke %}<span class="lohn-marke">{{ a.brutto_marke }}</span> {% endif %}{{ a.brutto | chf_wert }}</span>
+    </div>
+    {% if not b_einzeln %}
+      {% for z in a.brutto_zeilen %}
+        <div class="lohn-posten">
+          <span class="lohn-was">{{ z.label }}</span>
+          <span class="lohn-betrag">{% if z.marke %}<span class="lohn-marke">{{ z.marke }}</span> {% endif %}{{ z.betrag | chf_wert }}</span>
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    {% if a.abzug_zeilen %}
+      <div class="lohn-summenzeile">
+        <span class="lohn-was">{{ a.abzug_zeilen[0].label if z_einzeln else "Abzüge" }}</span>
+        <span class="lohn-betrag">{% if a.abzuege_marke %}<span class="lohn-marke">{{ a.abzuege_marke }}</span> {% endif %}−{{ a.abzuege | chf_wert }}</span>
+      </div>
+      {% if not z_einzeln %}
+        {% for z in a.abzug_zeilen %}
+          <div class="lohn-posten">
+            <span class="lohn-was">{{ z.label }}</span>
+            <span class="lohn-betrag">{% if z.marke %}<span class="lohn-marke">{{ z.marke }}</span> {% endif %}{{ z.betrag | chf_wert }}</span>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endif %}
+
+    <div class="lohn-ergebnis">
+      {% include "partials/lohn_ergebnis.html" %}
+    </div>
+
+    {% set probe = lohn_proben.get(tx.date.year) if lohn_proben is defined else None %}
+    {% if a.legende or a.grundlage or probe %}
+      <div class="lohn-fuss">
+        {# Jede vorkommende Stufe genau einmal, beide auf EINER Zeile: zwei
+           Halbsätze untereinander wären auf 375px zwei von vier Fusszeilen. #}
+        {% if a.legende %}
+          <span class="lohn-legende">{{ a.legende | join(" · ") }}</span>
+        {% endif %}
+        {# Das Zeichen sagt DASS die Zahl von anderswo kommt, die Grundlage sagt
+           WOHER. `title` als Rückfall: die Zeile ist auf zwei Zeilen begrenzt,
+           das Feld erlaubt 160 Zeichen — ohne ihn wäre der Rest nicht erreichbar. #}
+        {% if a.grundlage %}<span class="lohn-quelle" title="{{ a.grundlage }}">Grundlage: {{ a.grundlage }}</span>{% endif %}
+        {# Die Jahresprobe: das einzige, was eine fortgeschriebene Zahl widerlegen
+           kann. Sie steht auch an einem vollständig erfassten Monat — dass das
+           Jahr aufgeht, ist der Beleg dafür, dass die Nachbarmonate stimmen. #}
+        {% if probe %}
+          <span class="lohn-jahr{{ '' if probe.geht_auf else ' lohn-jahr-offen' }}">{{ probe.befund }}</span>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+</details>

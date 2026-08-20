@@ -1,0 +1,400 @@
+{# Treffen-Fonds: EIN gemeinsamer Spar-Topf für Besuche.
+
+   Aufbau von oben nach unten — Stand, wofür, wie er wächst, wann es losgeht:
+     1. Glas + Füllstand, daneben der gemeinsame Stand mit Herkunft
+     2. Zielzeile: nächstes Treffen, seine Kosten, was noch fehlt
+     3. Zurückgelegt je Monat und Person — mit BETRAG, nicht nur Haken
+     4. Prognose mit Marken an den Treffen
+     5. Treffen planen + Liste, Faktoren aufklappbar
+
+   Alles CHF; die Euro von B über den manuell gepflegten Kurs. #}
+
+{# ----------  Runde Marke: wo trifft man sich  ----------
+   Hier standen zwei Landesflaggen. Sie waren gut gewaehlt — eine Flagge sagt
+   von selbst, welches Ziel gemeint ist, waehrend ein blosser Farbkreis erst
+   eine Legende braucht. Sie sagten es aber auch jedem Fremden: zwei Laender
+   sind eine Auskunft ueber zwei Menschen.
+
+   Der Ersatz behaelt die Eigenschaft, die zaehlte: die Marke spricht fuer sich.
+   Statt eines Landes traegt sie den ANFANGSBUCHSTABEN der Person, bei der man
+   sich trifft — und der Name steht in den Einstellungen, also in den Daten.
+
+   Der Kreis-Zuschnitt liegt EINMAL als <clipPath> vor und wird von jeder Marke
+   referenziert. Der viewBox ist um 0 zentriert, damit dieselbe Marke auch in
+   der Prognose funktioniert, wo sie per translate() auf einen Kurvenpunkt
+   gesetzt wird. #}
+{% macro marke_inhalt(loc, name_a, name_b) %}
+  {% set name = name_b if loc == 'bei_b' else name_a %}
+  <g clip-path="url(#meet-flag-kreis)">
+    <rect x="-12" y="-12" width="24" height="24"
+          fill="{{ 'var(--chart-1)' if loc == 'bei_b' else 'var(--chart-0)' }}"/>
+    <text x="0" y="0" text-anchor="middle" dominant-baseline="central"
+          class="meet-marke-text">{{ (name or '?') | first | upper }}</text>
+  </g>
+{% endmacro %}
+
+{% macro flagge(loc, name_a='A', name_b='B') %}
+<svg class="meet-flag" viewBox="-12 -12 24 24" role="img"
+     aria-label="Treffen bei {{ name_b if loc == 'bei_b' else name_a }}">
+  {{ marke_inhalt(loc, name_a, name_b) }}<circle cx="0" cy="0" r="10.6" class="meet-flag-rand"/>
+</svg>
+{% endmacro %}
+
+{# Null als „0" statt als Gedankenstrich: hier ist die Null ein gemessener Wert
+   („noch nichts eingezahlt"), kein fehlender. chf_kurz macht daraus
+   sonst ein „–", und „€–" liest sich wie ein Anzeigefehler. #}
+{% macro zahl(v) %}{{ v | chf_kurz if v else '0' }}{% endmacro %}
+
+{# ----------  Ein Monat, beide Personen  ----------
+   Der Haken bestätigt die geplante Rate (Regelfall, ein Griff). Das Feld
+   daneben trägt einen abweichenden Betrag ein — leer heisst „nichts
+   zurückgelegt". Beides gilt für JEDEN Monat der Liste, auch für vergangene. #}
+{% macro monatsblock(m, kompakt=false) %}
+<div class="topf-monat{% if m.current %} ist-aktuell{% endif %}">
+  <div class="topf-monat-kopf">
+    <span class="topf-monat-name">{{ m.label }}</span>
+    {% if m.future %}<span class="topf-monat-tag">im Voraus</span>{% endif %}
+    {# Beschriftet, nicht nackt: eine Zahl allein am Zeilenende wirft genau die
+       Frage auf, was sie bedeutet. #}
+    {% if m.chf_sum %}<span class="topf-monat-sum">zusammen <span class="mono">CHF {{ m.chf_sum | chf_kurz }}</span></span>{% endif %}
+  </div>
+  {% for p in m.persons %}
+    <div class="topf-person{% if p.confirmed %} ist-gesetzt{% endif %}">
+      <button type="button" class="meet-confirm topf-haken{% if kompakt %} sm{% endif %}{% if p.confirmed %} on{% endif %}"
+              aria-pressed="{{ 'true' if p.confirmed else 'false' }}"
+              title="{{ p.label }}: geplante Rate {{ p.placeholder }} {{ p.currency }} {{ 'zurücknehmen' if p.confirmed else 'als zurückgelegt eintragen' }}"
+              hx-post="/savings-goals/meet/confirm" hx-target="#savings-root" hx-swap="innerHTML"
+              hx-vals='{"month": "{{ m.month.isoformat() }}", "person": "{{ p.key }}"}'>
+        <span class="topf-haken-box">{{ icon('check') }}</span>
+        <span class="topf-haken-name">{{ p.label }}</span>
+      </button>
+      {# change statt submit: der Betrag ist fertig, sobald das Feld verlassen
+         oder Enter gedrückt wird. Ein zusätzlicher Speichern-Knopf je Person
+         wären acht Knöpfe auf dem Schirm für eine Zahl, die man selten ändert. #}
+      <form class="topf-betrag meet-nights" hx-post="/savings-goals/meet/amount"
+            hx-target="#savings-root" hx-swap="innerHTML" hx-trigger="change">
+        <input type="hidden" name="month" value="{{ m.month.isoformat() }}">
+        <input type="hidden" name="person" value="{{ p.key }}">
+        <input name="amount" inputmode="decimal" autocomplete="off"
+               value="{{ p.field }}" placeholder="{{ p.placeholder }}"
+               aria-label="{{ m.label }} · {{ p.label }}: zurückgelegter Betrag in {{ p.currency }}">
+        <span class="meet-nights-suffix">{{ p.currency }}</span>
+      </form>
+    </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+
+<div class="card mb-4 meet-card">
+  <div class="flex items-center justify-between card-head">
+    <div class="label-cap" style="margin:0">Treffen mit {{ meet.settings.name_b }}</div>
+    <span class="muted text-sm">CHF {{ meet.monthly_total | chf_kurz }}/Mt geplant</span>
+  </div>
+
+  <svg class="meet-flag-defs" aria-hidden="true" focusable="false">
+    <defs><clipPath id="meet-flag-kreis"><circle cx="0" cy="0" r="11"/></clipPath></defs>
+  </svg>
+
+  {# ----------  Das eine Glas + gemeinsamer Stand  ---------- #}
+  {% set jar = meet.jar %}
+  {% set ziel = ('bei ' ~ meet.settings.name_b) if jar.location == 'bei_b' else ('bei ' ~ meet.settings.name_a) %}
+  {# Füllhöhe im Glas-Innenraum (y 38…132, also 94px nutzbar). #}
+  {% set fh = (jar.pct / 100 * 94) | round(1) %}
+  {# Münz-Reihen statt gekacheltem Muster: je Reihe 9px, gestapelt von unten.
+     Jede Münze bekommt eine dunklere Ellipse 2.6px darunter — das liest sich
+     als Materialstärke und macht aus flachen Kreisen einen echten Stapel.
+     Die Reihen versetzen sich abwechselnd, damit kein Raster entsteht. #}
+  {% set reihen = (fh / 9) | int %}
+  <div class="meet-top topf-kopf">
+    <div class="meet-jar">
+      <svg viewBox="0 0 120 152" class="jar-svg" role="img"
+           aria-label="Gemeinsamer Topf: {{ jar.pct }} Prozent der Kosten gespart">
+        <defs>
+          <clipPath id="jarclip-topf">
+            <rect x="25" y="37" width="70" height="95" rx="11"/>
+          </clipPath>
+          {# Glas: senkrechter Verlauf gibt Tiefe statt flacher Fläche. #}
+          <linearGradient id="jarglas-topf" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="var(--glass-shine)" stop-opacity=".18"/>
+            <stop offset="18%" stop-color="var(--glass-fill)" stop-opacity="0"/>
+            <stop offset="82%" stop-color="var(--glass-fill)" stop-opacity="0"/>
+            <stop offset="100%" stop-color="var(--glass-shine)" stop-opacity=".12"/>
+          </linearGradient>
+        </defs>
+
+        {# Münzen + Tönung, geclippt aufs Glas-Innere #}
+        {% if fh > 0 %}
+          <g clip-path="url(#jarclip-topf)">
+            <rect x="24" y="{{ 132 - fh }}" width="72" height="{{ fh }}" class="jar-fill"/>
+            {% for i in range(reihen) %}
+              {% set cy = 127 - i * 9 %}
+              {% set ungerade = i % 2 == 1 %}
+              {% for k in range(3 if ungerade else 4) %}
+                {% set cx = (43 + k * 17.5) if ungerade else (34 + k * 17.5) %}
+                <ellipse cx="{{ cx }}" cy="{{ cy + 2.6 }}" rx="8.2" ry="3.2" class="jar-coin-edge"/>
+                <ellipse cx="{{ cx }}" cy="{{ cy }}" rx="8.2" ry="3.2" class="jar-coin"/>
+              {% endfor %}
+            {% endfor %}
+          </g>
+        {% endif %}
+
+        {# Glas-Körper mit Verlauf + Glanzkante #}
+        <rect x="24" y="36" width="72" height="98" rx="12" fill="url(#jarglas-topf)" stroke="none"/>
+        <rect x="24" y="36" width="72" height="98" rx="12" class="jar-glass"/>
+        <path d="M 32 50 Q 30 86 33 120" class="jar-shine" fill="none"/>
+
+        {# Deckel ZULETZT und deckend: er sitzt auf dem Glasrand (überlappt ihn
+           um 5px) statt darüber zu schweben. #}
+        <rect x="22" y="28" width="76" height="13" rx="4" class="jar-lid"/>
+        <rect x="34" y="22" width="52" height="7" rx="3.5" class="jar-lid"/>
+      </svg>
+      {# Die Prozentzahl stand früher IM Glas. Ab etwa halbvoll lag sie auf den
+         Münzen und war nicht mehr lesbar; ihre Höhe sprang deshalb je nach
+         Füllstand. Unter dem Glas hat sie immer denselben Platz und denselben
+         Untergrund. #}
+      <div class="jar-pct topf-pct">{{ jar.pct }}<span class="topf-pct-zeichen">%</span></div>
+    </div>
+
+    <div class="meet-stats topf-stats">
+      <div class="metric-label">Gemeinsam gespart</div>
+      <div class="metric-value" data-countup="{{ meet.balance.total }}">{{ meet.balance.total | chf }}</div>
+    </div>
+
+    {# Herkunft, nicht Rangliste: eine ruhige Zeile statt zweier Spalten. Der
+       Kurs steht dabei, weil er von Hand gepflegt wird — ein veralteter Kurs
+       wäre sonst nirgends zu sehen. #}
+    <div class="topf-anteile">
+      <span class="topf-teil">davon {{ meet.settings.name_a }} <span class="mono">{{ zahl(meet.balance.a_chf) }}</span></span>
+      <span class="topf-teil">{{ meet.settings.name_b }} <span class="mono">€{{ zahl(meet.balance.b_eur) }}</span>{% if meet.balance.b_eur %} ≈ <span class="mono">{{ meet.balance.b_chf | chf_kurz }}</span>{% endif %}</span>
+      <span class="topf-teil topf-kurs">Kurs {{ meet.settings.eur_chf_rate }}</span>
+      {% if meet.settings.start_balance_chf > 0 %}
+        <span class="topf-teil">Start <span class="mono">{{ meet.settings.start_balance_chf | chf_kurz }}</span></span>
+      {% endif %}
+      {% if meet.balance.spent > 0 %}
+        <span class="topf-teil">ausgegeben <span class="mono">−{{ meet.balance.spent | chf_kurz }}</span> ({{ meet.balance.past_visits }} Treffen)</span>
+      {% endif %}
+    </div>
+
+  {# ----------  Wogegen gemessen wird  ----------
+     Ohne diese Zeile ist der Füllstand eine Prozentzahl ohne Bezug. Sie steht
+     IM Kopf-Raster: am breiten Schirm als dritte Spalte neben dem Stand (sonst
+     bliebe rechts ein Meter leere Karte), am Handy als Zeile darunter. #}
+  <div class="topf-ziel">
+    {{ flagge(jar.location, meet.settings.name_a, meet.settings.name_b) }}
+    <div class="topf-ziel-text">
+      <div class="meet-jar-label topf-ziel-kopf">{{ 'Nächstes Treffen' if jar.visit else 'Kein Treffen geplant' }}</div>
+      {# Als einzelne nicht umbrechende Glieder: bei 375px passt die Zeile nicht
+         am Stück, und ohne die Glieder bräche sie mitten in „Kosten CHF 1'548". #}
+      {# Die Nächte stehen bewusst NICHT hier: sie stehen in der Treffen-Liste
+         weiter unten in derselben Karte, und bei 375px kosten sie eine ganze
+         zusätzliche Zeile. #}
+      <div class="topf-ziel-sub">
+        {% if not jar.visit %}<span class="topf-teil">Massstab</span>{% endif %}
+        <span class="topf-teil">{{ ziel }}</span>
+        {% if jar.visit %}<span class="topf-teil">{{ jar.visit.date.strftime('%d.%m.%Y') }}</span>{% endif %}
+        <span class="topf-teil">Kosten CHF <span class="mono">{{ jar.cost | chf_kurz }}</span></span>
+      </div>
+    </div>
+    <span class="pill meet-jar-pill{{ ' ist-gedeckt' if jar.visits > 0 else ' ist-offen' }}">
+      {% if jar.visits > 0 %}reicht für {{ jar.visits }} Besuch{{ 'e' if jar.visits != 1 }}{% else %}noch CHF {{ jar.missing | chf_kurz }}{% endif %}
+    </span>
+  </div>
+  </div>
+
+  {# ----------  Zurückgelegt je Monat  ---------- #}
+  {% if meet.months %}
+    {# months[0] ist der ENTFERNTESTE Zukunftsmonat — prominent gehört aber der
+       laufende Monat. #}
+    {% set cur = (meet.months | selectattr('current') | list | first) or meet.months[0] %}
+    <div class="meet-month">
+      <div class="metric-label topf-abschnitt">Zurückgelegt</div>
+      {{ monatsblock(cur) }}
+    </div>
+    {% if meet.months | length > 1 %}
+      {# Bleibt nach einem Eintrag in einem dieser Monate offen — sonst klappt
+         die Liste bei jedem nachgetragenen Betrag wieder zu. #}
+      <details class="disclosure"{% if meet.offen == 'monate' %} open{% endif %}>
+        <summary class="text-sm">Weitere Monate · {{ meet.months_past }} vergangen, {{ meet.months_future }} im Voraus</summary>
+        <div class="meet-history">
+          {% for m in meet.months if not m.current %}
+            <div class="meet-history-row{% if m.future %} is-future{% endif %}">{{ monatsblock(m, kompakt=true) }}</div>
+          {% endfor %}
+        </div>
+        {# Wer die Liste aufklappt und seinen Monat nicht findet, steht GENAU
+           hier. Der Fonds-Start ist der einzige Hebel, der sie nach hinten
+           verlängert — bisher stand er nur unter „Faktoren", wo ihn niemand
+           sucht, der Beträge nachträgt. „monate" hält die Liste danach offen,
+           damit die dazugekommenen Monate an Ort und Stelle erscheinen. #}
+        <form class="topf-startmonat" hx-post="/savings-goals/meet/settings"
+              hx-target="#savings-root" hx-swap="innerHTML">
+          <input type="hidden" name="offen" value="monate">
+          <label>Liste beginnt ab
+            <input type="month" name="start_month" max="{{ meet.start_max }}"
+                   value="{{ meet.settings.start_month.strftime('%Y-%m') }}">
+          </label>
+          <button type="submit" class="btn btn-sm">Übernehmen</button>
+        </form>
+      </details>
+    {% endif %}
+  {% endif %}
+
+  {# ----------  Zukunfts-Prognose  ---------- #}
+  {% set p = meet.projection %}
+  <div class="meet-proj">
+    <div class="metric-label topf-abschnitt">Prognose · 18 Monate</div>
+    <svg viewBox="0 0 620 140" class="meet-proj-svg" role="img" aria-label="Spar-Prognose über 18 Monate">
+      {% if p.geo.area %}<path d="{{ p.geo.area }}" class="meet-area topf-flaeche"/>{% endif %}
+      <path d="{{ p.geo.line }}" class="meet-line topf-linie" fill="none"/>
+      <circle cx="{{ p.geo.last_x }}" cy="{{ p.geo.last_y }}" r="3" class="meet-last"/>
+      {# Treffen als Flagge statt als Farbpunkt: damit braucht die Kurve keine
+         Legende mehr, die man erst lesen muss, um den Einbruch zuzuordnen. #}
+      {% for mk in p.markers %}
+        {% if mk.x is defined %}
+          {# Zwei Gruppen: aussen die Position, innen die Grösse. Der 620er
+             viewBox wird je nach Schirm 0.55× bis 1.9× gestaucht bzw. gedehnt —
+             eine feste Skalierung ergäbe am Handy einen 10px-Fleck und am
+             Desktop eine 40px-Flagge. Die Grösse steht darum in der CSS. #}
+          <g class="topf-marke" transform="translate({{ mk.x }},{{ mk.y }})">
+            <title>{{ mk.visit.date.strftime('%d.%m.%Y') }} · {{ ('bei ' ~ meet.settings.name_b) if mk.visit.location == 'bei_b' else ('bei ' ~ meet.settings.name_a) }} · −{{ mk.cost | chf_kurz }}</title>
+            <g class="topf-marke-skala">
+              {{ marke_inhalt(mk.visit.location, meet.settings.name_a, meet.settings.name_b) }}
+              <circle cx="0" cy="0" r="11.8" class="meet-mark" fill="none"/>
+              <circle cx="0" cy="0" r="10.6" class="meet-flag-rand"/>
+            </g>
+          </g>
+        {% endif %}
+      {% endfor %}
+    </svg>
+    <div class="flex items-center justify-between muted text-sm">
+      <span>heute · {{ zahl(p.series[0]) }}</span>
+      <span>in 18 Mt · {{ zahl(p.series[-1]) }}</span>
+    </div>
+    {% if p.negative %}
+      {# Kein Alarmrot: das ist keine Stoerung, sondern eine Vorausschau, die
+         sich mit jeder Rate und jedem Treffen aendert. Rot ist fuer Dinge
+         reserviert, die JETZT falsch sind. #}
+      <p class="topf-vorschau">Mit den aktuellen Raten reicht der Topf nicht für alle geplanten Treffen.</p>
+    {% endif %}
+  </div>
+
+  {# ----------  Rückstellung auf dem echten Konto  ----------
+     Fehlt vollständig, solange kein Ferienkonto gewählt ist. „Zurückgelegt" ist
+     die Behauptung der Monatsliste, „überwiesen" die Antwort der Bank; die
+     Differenz ist das, was noch zu tun ist. #}
+  {% if meet.rueckstellung %}
+    {% set r = meet.rueckstellung %}
+    <div class="meet-rueckstellung">
+      <div class="metric-label topf-abschnitt">Rückstellung · {{ r.konto.name }}</div>
+      <div class="topf-anteile">
+        <span class="topf-teil">zurückgelegt <span class="mono">{{ r.soll | chf_kurz }}</span></span>
+        <span class="topf-teil">überwiesen <span class="mono">{{ r.ist | chf_kurz }}</span></span>
+        <span class="topf-teil">Saldo <span class="mono">{{ r.saldo | chf_kurz }}</span></span>
+        {% if r.offen %}
+          <span class="pill ist-offen">offen {{ r.offen | chf_kurz }}</span>
+        {% elif r.zuviel %}
+          <span class="pill ist-offen">zu viel {{ r.zuviel | chf_kurz }}</span>
+        {% else %}
+          <span class="pill ist-gedeckt">stimmt</span>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+
+  {# ----------  Treffen planen + Liste  ---------- #}
+  <div class="meet-visits">
+    <div class="metric-label topf-abschnitt">Treffen</div>
+    <form class="meet-visit-form" hx-post="/savings-goals/meet/visit" hx-target="#savings-root" hx-swap="innerHTML">
+      <input type="date" name="visit_date" required aria-label="Datum des Treffens">
+      <select name="location" aria-label="Treffpunkt">
+        <option value="bei_b">{{ meet.settings.name_a }} reist zu {{ meet.settings.name_b }}</option>
+        <option value="bei_a">{{ meet.settings.name_b }} reist zu {{ meet.settings.name_a }}</option>
+      </select>
+      {# Das Feld war 72px breit bei 58px Innenabstand rechts — vom Getippten
+         blieben rund vier Pixel sichtbar. Die Breite steht jetzt in der
+         Teil-CSS mit der nötigen Spezifität. #}
+      <span class="meet-nights">
+        <input type="number" name="nights" min="1" max="60" value="{{ meet.settings.default_nights }}"
+               aria-label="Anzahl Nächte">
+        <span class="meet-nights-suffix">Nächte</span>
+      </span>
+      <button type="submit" class="btn topf-visit-add">{{ icon('plus') }} Eintragen</button>
+    </form>
+    {% if meet.visits %}
+      {% for row in meet.visits %}
+        {# Datum, Ort und „war" in einem eigenen Block: als vier flache
+           Geschwister brach die Zeile bei 375px mitten im Datum („20.11.202" /
+           „6") und in der Pille („w" / "ar"). #}
+        <div class="meet-visit-row {{ 'past' if row.past }}">
+          {{ flagge(row.v.location, meet.settings.name_a, meet.settings.name_b) }}
+          <span class="topf-visit-text">
+            <span class="topf-visit-datum">{{ row.v.date.strftime('%d.%m.%Y') }}</span>
+            <span class="topf-visit-ort">{{ ('bei ' ~ meet.settings.name_b) if row.v.location == 'bei_b' else ('bei ' ~ meet.settings.name_a) }} · {{ row.v.nights }} Nächte</span>
+            {% if row.past %}<span class="pill topf-visit-war">war</span>{% endif %}
+            {% if row.verbrauch %}
+              {% set vb = row.verbrauch %}
+              {# Nur EINE neue Zahl. Die gerechneten Kosten stehen schon rechts
+                 in der Zeile; sie hier zu wiederholen („bezahlt 750 von 900"
+                 neben „−900") stellte dieselbe Zahl zweimal hin. Eine Pille
+                 mit der Differenz war noch schlechter: als „−150" direkt neben
+                 „−900" sah sie aus wie ein zweiter Betrag derselben Art.
+                 Sie bleibt für den einen Fall, der auffallen MUSS. #}
+              <span class="topf-visit-verbrauch">
+                {% if vb.nichts_bezahlt %}
+                  <span class="pill">nicht ab Ferienkonto</span>
+                {% else %}
+                  bezahlt <span class="mono">{{ vb.abgang | chf_kurz }}</span>
+                  {% if vb.differenz > 0 %}
+                    <span class="pill ist-offen">+{{ vb.differenz | chf_kurz }} über</span>
+                  {% endif %}
+                {% endif %}
+              </span>
+            {% endif %}
+          </span>
+          <span class="mono topf-visit-kosten">−{{ row.cost | chf_kurz }}</span>
+          <button type="button" class="icon-action danger" title="Treffen entfernen" aria-label="Treffen entfernen"
+                  hx-post="/savings-goals/meet/visit/{{ row.v.id }}/delete" hx-target="#savings-root" hx-swap="innerHTML"
+                  hx-confirm="Treffen am {{ row.v.date.strftime('%d.%m.%Y') }} entfernen?">{{ icon('trash') }}</button>
+        </div>
+      {% endfor %}
+    {% else %}
+      {# Das Formular zum Eintragen steht direkt darüber — die Aufforderung
+         wiederholte nur, was man sieht. #}
+      <div class="muted text-sm" style="padding:6px 0">Noch kein Treffen geplant.</div>
+    {% endif %}
+  </div>
+
+  {# ----------  Faktoren (aufklappbar)  ---------- #}
+  <details class="disclosure"{% if meet.offen == 'faktoren' %} open{% endif %}>
+    <summary class="text-sm">Faktoren anpassen</summary>
+    <form class="meet-settings" hx-post="/savings-goals/meet/settings" hx-target="#savings-root" hx-swap="innerHTML">
+      {# Die beiden Namen sind DATEN. Sie stehen hier oben, weil alles
+         darunter sie benutzt — wer sie ändert, sieht die Wirkung sofort. #}
+      <label>Name Person A<input name="name_a" maxlength="40" value="{{ meet.settings.name_a }}"></label>
+      <label>Name Person B<input name="name_b" maxlength="40" value="{{ meet.settings.name_b }}"></label>
+      <label>Rate {{ meet.settings.name_a }} (CHF/Mt)<input name="monthly_a_chf" inputmode="decimal" value="{{ meet.settings.monthly_a_chf }}"></label>
+      <label>Rate {{ meet.settings.name_b }} (€/Mt)<input name="monthly_b_eur" inputmode="decimal" value="{{ meet.settings.monthly_b_eur }}"></label>
+      <label>Kurs EUR→CHF<input name="eur_chf_rate" inputmode="decimal" value="{{ meet.settings.eur_chf_rate }}"></label>
+      <label>Flug {{ meet.settings.name_a }} (CHF)<input name="flight_a_chf" inputmode="decimal" value="{{ meet.settings.flight_a_chf }}"></label>
+      <label>Flug {{ meet.settings.name_b }} (CHF)<input name="flight_b_chf" inputmode="decimal" value="{{ meet.settings.flight_b_chf }}"></label>
+      <label>Airbnb/Nacht (CHF)<input name="airbnb_night_chf" inputmode="decimal" value="{{ meet.settings.airbnb_night_chf }}"></label>
+      <label>Verpflegung/Tag (CHF)<input name="food_day_chf" inputmode="decimal" value="{{ meet.settings.food_day_chf }}"></label>
+      <label>Nächte Standard<input name="default_nights" inputmode="numeric" value="{{ meet.settings.default_nights }}"></label>
+      <label>Startbetrag (CHF)<input name="start_balance_chf" inputmode="decimal" value="{{ meet.settings.start_balance_chf }}"></label>
+      {# Bestimmt, wie weit die Monatsliste zurückreicht — der Hebel, um einen
+         vergessenen Monat vor dem bisherigen Start überhaupt nachtragen zu können. #}
+      <label>Fonds-Start<input type="month" name="start_month" value="{{ meet.settings.start_month.strftime('%Y-%m') }}"></label>
+      {# Ohne Konto bleibt der Abgleich aus — leer ist darum eine echte Wahl und
+         nicht „unverändert". #}
+      <label>Ferienkonto
+        <select name="holiday_account_id">
+          <option value="">—</option>
+          {% for k in meet.konten %}
+            <option value="{{ k.id }}"{{ ' selected' if meet.settings.holiday_account_id == k.id }}>{{ k.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div style="grid-column:1 / -1"><button type="submit" class="btn btn-primary">Speichern</button></div>
+    </form>
+  </details>
+</div>

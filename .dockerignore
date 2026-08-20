@@ -1,0 +1,30 @@
+# Was nicht ins Abbild gehört. Zwei Gründe: Grösse — und alles, was hier
+# steht, läge sonst in jeder Schicht des Images, auch wenn es später gelöscht
+# wird.
+.env
+data/
+_devdata/
+_backups/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+*.pem
+*.key
+secret_key
+
+.git/
+.github/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+docs/
+tests/
+.idea/
+.vscode/
+.DS_Store
+desktop.ini

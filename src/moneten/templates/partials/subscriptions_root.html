@@ -1,0 +1,296 @@
+{# Inhalt von #subscriptions-root: getrennt in ABOS und WIEDERKEHRENDE ZAHLUNGEN,
+   je mit Kosten-Aufteilung (split_bar), Liste (manuell + erkannt), darunter die
+   Händlersuche und ein Erfassungs-/Bearbeitungs-Formular mit Typ-Umschalter. #}
+{% from "partials/cat_picker.html" import cat_picker %}
+{% from "partials/split_bar.html" import split_bar %}
+{% from "partials/row_menu.html" import row_menu %}
+{% if error %}<div class="feedback err" style="margin-bottom:14px">{{ error }}</div>{% endif %}
+
+{# ----------  Eine Sektion (Abos ODER Wiederkehrende) als Makro  ---------- #}
+{% macro sub_section(title, bucket, empty_hint) %}
+<div class="card">
+  <div class="flex items-center justify-between" style="gap:10px;flex-wrap:wrap">
+    <div class="label-cap">{{ title }}</div>
+    <div class="text-sm muted mono" style="white-space:nowrap">{{ bucket.monthly | chf }}/Mt · {{ bucket.yearly | chf }}/Jahr</div>
+  </div>
+
+  {# Balken OHNE Legende: sie listete zeichengleich dieselben Namen und Beträge
+     wie die Zeilenliste unmittelbar darunter — dieselbe Datenquelle, zweimal
+     gerendert. Die Zuordnung Farbe→Eintrag übernehmen die Icons im Balken und
+     dessen Tooltip. #}
+  {% if bucket.segments %}
+    {{ split_bar(bucket.segments, height=34, legend=false) }}
+    <div style="height:10px"></div>
+  {% endif %}
+
+  {% for r in bucket.manual_rows %}
+    <div class="row abo-row">
+      <span class="flex items-center gap-2" style="min-width:0">
+        {{ icon(r.m.category.icon if r.m.category else 'repeat') }}
+        {# „monatlich" steht NICHT mehr da: der Betrag rechts trägt „/Mt", das ist
+           dasselbe Wort zweimal in derselben Zeile. „jährlich" bleibt — dort
+           weicht der gezeigte Monatswert vom tatsächlichen Abgang ab.
+           Ebenso weg: eine Kategorie, die gleich heisst wie der Eintrag
+           („KI-Dienste · KI-Dienste"). #}
+        <span style="min-width:0">{{ r.m.name }}
+          <span class="muted text-sm">{% if r.m.interval.value == 'jaehrlich' %} · jährlich{% endif %}{% if r.m.category and r.m.category.name != r.m.name %} · {{ r.m.category.name }}{% endif %}{% if r.connected %} · {{ icon('arrows-exchange') }}{{ r.connected }} verbunden{% endif %}</span>
+        </span>
+      </span>
+      <span class="flex items-center gap-2" style="white-space:nowrap">
+        <span class="mono">{{ r.monthly | chf }}<span class="muted text-sm">/Mt</span></span>
+        {% call row_menu() %}
+          {% if r.kuendigung %}
+            {# Kein Knopf, sondern eine Rechnung: was frei würde, und was das für
+               das nächste Sparziel heisst. #}
+            <div class="rowmenu-info">
+              <strong>{{ r.kuendigung.jaehrlich | chf }}</strong> im Jahr frei
+              {%- if r.kuendigung.ziel %}<br>
+                <span class="muted">
+                  {%- if r.kuendigung.ziel.wochen %}„{{ r.kuendigung.ziel.name }}" wäre rund
+                    {{ r.kuendigung.ziel.wochen }} Woche{{ 'n' if r.kuendigung.ziel.wochen != 1 }} früher voll
+                  {%- else %}für „{{ r.kuendigung.ziel.name }}": {{ r.kuendigung.ziel.hinweis }}
+                  {%- endif %}
+                </span>
+              {%- endif %}
+            </div>
+          {% endif %}
+          <button type="button" class="rowmenu-item" role="menuitem"
+                  hx-get="/subscriptions?form=edit&id={{ r.m.id }}" hx-target="#subscriptions-root" hx-swap="innerHTML">{{ icon('pencil') }} Bearbeiten</button>
+          <button type="button" class="rowmenu-item danger" role="menuitem"
+                  hx-post="/subscriptions/{{ r.m.id }}/delete" hx-target="#subscriptions-root" hx-swap="innerHTML"
+                  hx-confirm="„{{ r.m.name }}“ löschen?">{{ icon('trash') }} Löschen</button>
+        {% endcall %}
+      </span>
+    </div>
+  {% endfor %}
+
+  {% for s in bucket.detected %}{{ detected_row(s) }}{% endfor %}
+
+  {# „Vermutlich beendet": seit mehr als dem doppelten Rhythmus keine Zahlung →
+     separat, NICHT in der Summe. #}
+  {% if bucket.detected_stale %}
+    <details class="abo-stale disclosure">
+      <summary>Vermutlich beendet ({{ bucket.detected_stale | length }})</summary>
+      {% for s in bucket.detected_stale %}{{ detected_row(s, stale=true) }}{% endfor %}
+    </details>
+  {% endif %}
+
+  {% if not bucket.manual_rows and not bucket.detected and not bucket.detected_stale %}
+    <div class="muted text-sm" style="padding:8px 0">{{ empty_hint }}</div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# ----------  Eine erkannte Zahlung als Zeile  ----------
+   ``s.name`` ist der aufgeräumte Händlername; der rohe Buchungstext hängt als
+   title daran, damit nachprüfbar bleibt, WORAUS die Zeile entstand. #}
+{% macro detected_row(s, stale=false) %}
+  <div class="row abo-row{{ ' abo-beendet' if stale }}">
+    <span class="flex items-center gap-2" style="min-width:0">
+      {{ icon(s.category.icon if s.category else 'repeat') }}
+      <span style="min-width:0">
+        <span title="{{ s.beleg }}">{{ s.name or '(ohne Beschreibung)' }}</span>
+        {# Gleiche Streichung wie oben: „monatlich" wiederholt das „/Mt" am
+           Betrag, eine namensgleiche Kategorie wiederholt den Namen. Beides
+           kostete auf 375px je eine zusätzliche Zeile pro erkannter Zahlung. #}
+        <span class="muted text-sm">{% if s.rhythmus != 'monatlich' %} · {{ s.rhythmus }}{% endif %} · {{ s.zahlungen }} Zahlung{{ 'en' if s.zahlungen != 1 }}{% if s.rhythmus != 'monatlich' %} à {{ s.amount | chf }}{% endif %}{% if s.category and s.category.name != s.name %} · {{ s.category.name }}{% endif %}
+          {%- if stale and s.last_date %} · zuletzt {{ s.last_date.strftime('%m.%Y') }} (vor {{ s.months_since }} Mt){% endif %}</span>
+        {% if s.vorher %}
+          {# Ein Stufenwechsel ist keine Störung, sondern die Information: der
+             Preis ist gestiegen (oder gefallen). Ohne „CHF": die Währung steht
+             in derselben Zeile schon zweimal, und auf 375 px zählt jedes Zeichen. #}
+          <span class="abo-step">{{ s.vorher | chf_wert }} → {{ s.amount | chf_wert }}{% if s.seit %} seit {{ s.seit.strftime('%m.%Y') }}{% endif %}</span>
+        {% endif %}
+      </span>
+    </span>
+    <span class="flex items-center gap-2 abo-row-tail" style="white-space:nowrap">
+      <span class="mono{{ ' muted' if stale }}">{{ s.monthly | chf }}<span class="{{ 'text-sm' if stale else 'muted text-sm' }}">/Mt</span></span>
+      {{ abo_detected_actions(s) }}
+    </span>
+  </div>
+{% endmacro %}
+
+{# Übernehmen/Ausblenden-Knöpfe einer erkannten Zahlung (aktiv wie auch beendet).
+   Übernommen wird der Betrag im echten Rhythmus: ein Jahresabo als „x/Monat" zu
+   speichern verlöre die Zahlung, die einmal im Jahr wirklich abgeht. #}
+{% macro abo_detected_actions(s) %}
+  {% set jaehrlich = (s.rhythmus == 'jährlich') %}
+  <form hx-post="/subscriptions/adopt" hx-target="#subscriptions-root" hx-swap="innerHTML" style="display:inline">
+    <input type="hidden" name="merchant_key" value="{{ s.key }}">
+    <input type="hidden" name="name" value="{{ s.name }}">
+    <input type="hidden" name="amount" value="{{ '%.2f'|format(s.amount if jaehrlich else s.monthly) }}">
+    <input type="hidden" name="interval" value="{{ 'jaehrlich' if jaehrlich else 'monatlich' }}">
+    <input type="hidden" name="category_id" value="{{ s.category.id if s.category else '' }}">
+    {# Bewusst KEIN btn-primary: der Knopf steht in jeder erkannten Zeile. Als
+       gefüllte Akzentfläche wiederholt, frisst er den Akzent auf, den die
+       Beträge und der Preiswechsel tragen sollen. #}
+    <button type="submit" class="btn abo-adopt" title="Als festen Eintrag übernehmen (dann editierbar)">übernehmen</button>
+  </form>
+  <form hx-post="/subscriptions/dismiss" hx-target="#subscriptions-root" hx-swap="innerHTML" style="display:inline"
+        hx-confirm="„{{ s.name }}“ künftig ausblenden?">
+    <input type="hidden" name="merchant_key" value="{{ s.key }}">
+    <button type="submit" class="btn btn-ghost text-sm abo-hide" aria-label="ausblenden" title="ausblenden">✕</button>
+  </form>
+{% endmacro %}
+
+{# ----------  Leitzahl: was jeden Monat fix abfliesst  ----------
+   Vorher drei gleichwertige Kacheln, deren dritte rechnerisch nur die Summe der
+   ersten beiden war — und deren Werte gleich darunter im Kopf jeder Sektion ein
+   zweites Mal standen. Jetzt trägt die Gesamtsumme den Screen, die Aufteilung
+   steht klein darunter und sonst nur noch bei den Sektionen selbst. #}
+<div class="card mb-4">
+  <div class="metric-label">Fixe Kosten pro Monat</div>
+  <div class="budget-hero-num" data-countup="{{ summary.monthly }}">{{ summary.monthly | chf }}</div>
+  <div class="budget-hero-foot">
+    <span>Abos {{ buckets.abo.monthly | chf_kurz }} · Wiederkehrend {{ buckets.fix.monthly | chf_kurz }}</span>
+    <span class="mono">{{ summary.yearly | chf_kurz }}/Jahr</span>
+  </div>
+</div>
+
+{# ----------  Zwei getrennte Sektionen  ---------- #}
+<div class="grid-main">
+  {# Ohne Wegbeschreibung: die Händlersuche steht als eigene Karte sichtbar
+     direkt darunter und trägt ihre Überschrift selbst. #}
+  {{ sub_section("Abos", buckets.abo, "Noch keine Abos erkannt.") }}
+  {{ sub_section("Wiederkehrende Zahlungen", buckets.fix, "Noch keine wiederkehrenden Zahlungen erfasst.") }}
+</div>
+
+{# ----------  Händlersuche  ----------
+   Steht bewusst offen und ausserhalb des Erfassungs-Formulars: sie ist der Weg
+   für alles, was die Erkennung NICHT findet, und war zugeklappt nicht auffindbar. #}
+{% set pf = prefill if (prefill and not prefill.get('none')) else None %}
+{% if not (form_mode == 'edit' and edit_sub) %}
+<div class="card mt-4 abo-suche">
+  <div class="label-cap">Abo in den Buchungen suchen</div>
+  <form hx-get="/subscriptions" hx-target="#subscriptions-root" hx-swap="innerHTML">
+    <div class="flex gap-2 items-center" style="margin-top:8px">
+      <input type="search" name="match_q" class="full-w" autocomplete="off"
+             placeholder="Händler, z.B. musterdienst, mobilfunk, krankenkasse…" value="{{ prefill.query if prefill else '' }}">
+      <button type="submit" class="btn btn-primary abo-suche-btn" aria-label="Suchen" title="Suchen">{{ icon('search') }}</button>
+    </div>
+  </form>
+
+  {% if prefill and prefill.get('none') %}
+    {# „Unten trotzdem selbst erfassen" entfällt: bei einer Suche ohne Treffer
+       klappt das Erfassungs-Formular ohnehin auf und steht offen darunter. #}
+    <div class="feedback err" style="margin-top:10px">Keine Buchungen zu „{{ prefill.query }}" gefunden.</div>
+  {% elif pf %}
+    <div class="abo-fund">
+      <div class="abo-fund-kopf">
+        <span>{{ pf.count }} Buchung{{ 'en' if pf.count != 1 }} · {{ pf.rhythmus }}</span>
+        <span class="mono">{{ pf.amount | chf }}{{ '/Jahr' if pf.interval == 'jaehrlich' else '/Mt' }}</span>
+      </div>
+      {% if pf.vorher %}
+        <div class="abo-step">{{ pf.vorher | chf_wert }} → {{ pf.amount | chf_wert }}{% if pf.seit %} seit {{ pf.seit.strftime('%m.%Y') }}{% endif %}</div>
+      {% endif %}
+      <ul class="abo-treffer">
+        {% for h in pf.hits[:8] %}
+          <li><span>{{ h.date.strftime('%d.%m.%Y') }}</span><span class="mono">{{ h.amount | chf }}</span></li>
+        {% endfor %}
+      </ul>
+      {% if pf.hits | length > 8 %}
+        <div class="muted text-sm abo-treffer-mehr">… und {{ pf.hits | length - 8 }} weitere bis {{ pf.first_date.strftime('%m.%Y') }}</div>
+      {% endif %}
+      <div class="muted text-sm abo-treffer-mehr">Werden beim Speichern verbunden.</div>
+    </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ----------  Erfassen / Bearbeiten (gemeinsames Formular mit Typ-Umschalter)  ---------- #}
+{% set editing = (form_mode == 'edit' and edit_sub) %}
+{% set cur_kind = edit_sub.kind if editing else 'abo' %}
+{# fv = zuletzt eingetippte Rohwerte nach einem Validierungsfehler; sie gewinnen
+   über Bearbeitungs- und Vorbefüllwerte, sonst tippt man alles neu. #}
+{% set fv = form_values or {} %}
+{# Das Formular war dauerhaft offen und stapelte auf dem Handy sechs Felder
+   unter die Liste, obwohl man es nur beim Anlegen oder Ändern braucht. Es
+   startet jetzt zugeklappt — ausser man bearbeitet gerade etwas oder eine
+   Händlersuche hat schon Werte vorbefüllt (dann wäre Zuklappen sinnwidrig). #}
+<details class="card mt-4 bgrp" {{ 'open' if (editing or prefill or fv) else '' }}>
+  <summary class="bgrp-head">
+    <span class="bgrp-title">{{ icon('plus', "cat-icon lg") }}<span>{{ "Eintrag bearbeiten" if editing else "Selbst erfassen" }}</span></span>
+  </summary>
+  <div class="bgrp-body">
+
+  <form hx-post="{{ ('/subscriptions/' ~ edit_sub.id ~ '/update') if editing else '/subscriptions' }}"
+        hx-target="#subscriptions-root" hx-swap="innerHTML">
+    <input type="hidden" name="match_keyword" value="{{ (edit_sub.match_keyword or '') if editing else (pf.keyword if pf else '') }}">
+
+    {# Typ: Abo vs. wiederkehrende Zahlung #}
+    <div class="seg" style="margin-bottom:14px">
+      <label class="seg-opt">
+        <input type="radio" name="kind" value="abo" {% if cur_kind != 'fix' %}checked{% endif %}>
+        <span>Abo</span>
+      </label>
+      <label class="seg-opt">
+        <input type="radio" name="kind" value="fix" {% if cur_kind == 'fix' %}checked{% endif %}>
+        <span>Wiederkehrende Zahlung</span>
+      </label>
+    </div>
+
+    <div class="grid-2" style="gap:12px">
+      <div style="grid-column:1 / -1">
+        <label>Name</label>
+        <input name="name" class="full-w" required placeholder="z.B. Netflix oder Miete"
+               value="{{ fv.get('name') or (edit_sub.name if editing else (pf.name if pf else '')) }}">
+      </div>
+      <div>
+        <label>Betrag</label>
+        <input name="amount" class="full-w" inputmode="decimal" required placeholder="z.B. 19.90"
+               value="{{ fv.get('amount') or ('%.2f'|format(edit_sub.amount) if editing else ('%.2f'|format(pf.amount) if pf else '')) }}">
+      </div>
+      <div>
+        <label>Intervall</label>
+        {% set iv = fv.get('interval') or (edit_sub.interval.value if editing else (pf.interval if pf else 'monatlich')) %}
+        <select name="interval" class="full-w">
+          <option value="monatlich" {% if iv != 'jaehrlich' %}selected{% endif %}>monatlich</option>
+          <option value="jaehrlich" {% if iv == 'jaehrlich' %}selected{% endif %}>jährlich</option>
+        </select>
+      </div>
+      <div>
+        <label>Kategorie (optional)</label>
+        {{ cat_picker("category_id", category_groups,
+                      selected=(edit_sub.category_id if editing else ""),
+                      none_label="— keine —") }}
+      </div>
+      <div>
+        <label>Konto (optional)</label>
+        <select name="account_id" class="full-w">
+          <option value="">— keins —</option>
+          {% for acc in accounts %}
+            <option value="{{ acc.id }}" {% if editing and edit_sub.account_id == acc.id %}selected{% endif %}>{{ acc.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="grid-column:1 / -1">
+        <label>Notiz (optional)</label>
+        <input name="notes" class="full-w" value="{{ fv.get('notes') or (edit_sub.notes or '' if editing else '') }}">
+      </div>
+    </div>
+    <div class="flex gap-2 mt-4">
+      <button type="submit" class="btn btn-primary">{{ "Speichern" if editing else "Hinzufügen" }}</button>
+      {% if editing %}
+        <button type="button" class="btn btn-ghost" hx-get="/subscriptions?form=none"
+                hx-target="#subscriptions-root" hx-swap="innerHTML">Abbrechen</button>
+      {% endif %}
+    </div>
+  </form>
+  </div>
+</details>
+
+{# ----------  Ausgeblendete Händler wieder einblenden  ---------- #}
+{% if dismissed %}
+  <details class="card mt-4 disclosure">
+    <summary class="label-cap">Ausgeblendete ({{ dismissed | length }})</summary>
+    {% for d in dismissed %}
+      <div class="row">
+        <span class="mono text-sm">{{ d.merchant_key }}</span>
+        <form hx-post="/subscriptions/restore" hx-target="#subscriptions-root" hx-swap="innerHTML" style="display:inline">
+          <input type="hidden" name="merchant_key" value="{{ d.merchant_key }}">
+          <button type="submit" class="btn btn-ghost text-sm">wieder einblenden</button>
+        </form>
+      </div>
+    {% endfor %}
+  </details>
+{% endif %}

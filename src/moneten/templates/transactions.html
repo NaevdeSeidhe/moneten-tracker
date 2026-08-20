@@ -1,0 +1,18 @@
+{% extends "_shell.html" %}
+{% from "partials/cat_picker.html" import cat_panel %}
+{# Diese Seite benutzt den Kategorie-Picker → das eine gemeinsame Panel
+   gehört in die Shell, ausserhalb aller HTMX-Ziele. #}
+{% block cat_panel %}{{ cat_panel(category_groups) }}{% endblock %}
+{% block title %}Buchungen — Moneten-Tracker{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div>
+    <h1 class="hero-greeting">Buchungen</h1>
+  </div>
+</div>
+
+<div id="transactions-root">
+  {% include "partials/transactions_root.html" %}
+</div>
+{% endblock %}

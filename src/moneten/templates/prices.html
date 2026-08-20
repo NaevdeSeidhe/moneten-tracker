@@ -1,0 +1,114 @@
+{% extends "_shell.html" %}
+{% block title %}Preisverlauf — Moneten-Tracker{% endblock %}
+
+{#  Sparkline als reines SVG: keine Chart-Bibliothek für zwölf Punkte, und im
+    <details> geschlossener Zustand ist sie die einzige Information, die zählt.
+    Skaliert auf die eigene Spanne des Artikels — der Verlauf ist die Aussage,
+    nicht die absolute Höhe.  #}
+{% macro sparkline(punkte, farbe) %}
+  {% set preise = punkte | map(attribute='preis') | list %}
+  {% set lo = preise | min %}
+  {% set hi = preise | max %}
+  {% set spanne = (hi - lo) if hi > lo else 1 %}
+  <svg class="pv-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+    <polyline fill="none" stroke="{{ farbe }}" stroke-width="2"
+              stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"
+              points="{% for p in punkte %}{{ (loop.index0 / ((punkte|length - 1) or 1) * 100) | round(1) }},{{ (24 - (p.preis - lo) / spanne * 20) | round(1) }} {% endfor %}"/>
+    {% set letzt = punkte | last %}
+    <circle cx="100" cy="{{ (24 - (letzt.preis - lo) / spanne * 20) | round(1) }}" r="2.5" fill="{{ farbe }}"/>
+  </svg>
+{% endmacro %}
+
+{% block content %}
+{# KEINE ERKLÄRZEILE UNTER DER ÜBERSCHRIFT. „Was einzelne Artikel früher
+   gekostet haben — aus deinen gescannten Belegen" war die Definition des Wortes
+   „Preisverlauf" und stand auf jedem Aufruf da. Woher die Zahlen stammen, sagt
+   der Aufklapper am Fuss der Seite. #}
+<div class="hero">
+  <div>
+    <h1 class="hero-greeting">Preisverlauf</h1>
+  </div>
+</div>
+
+{% if not artikel %}
+  <div class="card empty">
+    <p>Noch kein Verlauf.</p>
+    {# Die Bedingung ist die Information, nicht die Aufmunterung: unter zwei
+       Belegen an verschiedenen Tagen gibt es keinen Verlauf, und ohne diesen
+       Satz sähe die leere Seite nach einem Fehler aus. #}
+    <p class="muted text-sm">Dafür braucht es denselben Artikel auf
+       <strong>mindestens zwei</strong> Belegen an verschiedenen Tagen.</p>
+    <p class="muted text-sm">Belege scannen: Kamera-Knopf unten rechts, am PC
+       <a href="/quick">Schnell erfassen</a>. Die Positionen landen automatisch hier.</p>
+  </div>
+{% else %}
+
+  <div class="card mb-4 sunken pv-summe">
+    <span><strong class="mono">{{ anzahl_teurer }}</strong> teurer</span>
+    <span><strong class="mono">{{ anzahl_guenstiger }}</strong> günstiger</span>
+    <span class="muted text-sm">{{ artikel | length }} Artikel mit Verlauf</span>
+  </div>
+
+  {% for a in artikel %}
+    {% set farbe = 'var(--danger)' if a.diff > 0 else ('var(--accent-tertiary)' if a.diff < 0 else 'var(--text-tertiary)') %}
+    <details class="card mb-2 pv-item">
+      <summary class="pv-head">
+        <span class="pv-name">{{ a.name | desc_kurz }}</span>
+        {{ sparkline(a.punkte, farbe) }}
+        <span class="pv-preis">
+          <strong class="mono">{{ a.letzt | chf_wert }}</strong>
+          <span class="mono pv-delta" style="color:{{ farbe }}">
+            {{ '+' if a.diff > 0 }}{{ a.pct | round(0) | int }}%
+          </span>
+        </span>
+      </summary>
+      {# MARKE STATT SATZ. Unter der Liste stand „Am günstigsten war er am
+         12.03.2026 für CHF 3.20 bei …" — Datum, Betrag und Händler, die als
+         Zeile drei Zeilen weiter oben schon stehen. Der Satz zeigte also auf
+         eine Zeile, statt sie zu markieren. Jetzt trägt die Zeile die Marke.
+
+         Nur, wenn der Tiefpunkt UNTER dem aktuellen Preis liegt: ist der
+         jüngste Preis selbst der tiefste, markierte das Zeichen den heutigen
+         Preis als vergangenen Fund. Dieselbe Bedingung wie vorher. #}
+      {% set guenstigster = a.guenstigster %}
+      {% set tiefpunkt = guenstigster if guenstigster.preis < a.letzt else none %}
+      <div class="pv-punkte">
+        {% for p in a.punkte %}
+          <div class="row">
+            <span>{{ p.datum.strftime('%d.%m.%Y') }}
+              {%- if p.haendler %} <span class="muted text-sm">{{ p.haendler }}</span>{% endif -%}
+              {%- if p is sameas tiefpunkt %} <span class="pv-tief">günstigster</span>{% endif -%}
+            </span>
+            <span class="mono">{{ p.preis | chf_wert }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    </details>
+  {% endfor %}
+
+  {% if gekappt %}
+    {# Sortiert wird nach Preisänderung absteigend, abgeschnitten also das untere
+       Ende der Liste. Das sind nicht die unauffälligen, sondern die am stärksten
+       verbilligten Artikel — der Hinweis muss das sagen, sonst führt er in die Irre.
+       Als Zahl mit Etikett statt als Satz; beide Angaben bleiben. #}
+    <p class="muted text-sm"><strong class="mono">{{ gekappt }}</strong> weitere
+       nicht aufgeführt · die am stärksten verbilligten</p>
+  {% endif %}
+{% endif %}
+
+{# EINMAL-ERKLÄRUNG, ZUGEKLAPPT. Hier standen vier Sätze am Fuss JEDES Aufrufs,
+   darunter der längste der ganzen App (17 Wörter über die Gebindegrösse). Wer
+   einmal begriffen hat, dass 250 g und 500 g Butter zwei Reihen sind, braucht es
+   nie wieder. Der Text bleibt vollständig: er nennt die Bedingung, unter der ein
+   einzelner Punkt zu hoch liegt — das muss wissen, wer einem Ausreisser glauben
+   will. Erreichbar ist er mit einem Griff, im Weg steht er nicht mehr. #}
+<details class="disclosure card sunken mt-4 pv-erklaerung">
+  <summary>Zuordnung und Stückpreis</summary>
+  <p class="muted text-sm">
+    Die Zuordnung „derselbe Artikel" läuft über den Text auf dem gescannten Beleg.
+    Die Gebindegrösse gehört dazu — 250 g und 500 g Butter sind zwei Reihen. Steht
+    auf einem Beleg eine Stückzahl, wird auf den Stückpreis umgerechnet; fehlt sie,
+    kann ein einzelner Punkt zu hoch liegen. Deshalb steht das Datum bei jedem Preis.
+  </p>
+</details>
+{% endblock %}

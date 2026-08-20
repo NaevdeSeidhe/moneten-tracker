@@ -1,0 +1,536 @@
+/* =========================================================================
+   Moneten-Tracker — SKINS (Farbwelten)
+
+   Diese Datei enthält AUSSCHLIESSLICH Token-Definitionen — keine einzige
+   Komponenten-Regel. theme.css beschreibt, WIE etwas aussieht (Geometrie,
+   Layout, Zustände) und greift dafür nur auf die Variablen hier zu.
+
+   ---------------------------------------------------------------------
+   EIN NEUES THEME ANLEGEN
+   ---------------------------------------------------------------------
+   1. Block `[data-theme="name"] { … }` unten anhängen und die Pflicht-Token
+      aus dem Vertrag setzen (alles darunter ist optional, es gibt Fallbacks).
+   2. Namen in moneten/icons.py → THEMES eintragen (Label + Helligkeit).
+   Fertig — kein Anfassen von theme.css, kein neuer HTTP-Request, der
+   Wechsel läuft client-seitig ohne Nachladen (alle Skins sind schon da).
+
+   Warum alle Skins in EINER Datei statt je einer pro Theme? Der Wechsel
+   passiert im Browser durch Setzen von data-theme am <html>. Läge jeder
+   Skin in einer eigenen Datei, müsste beim Umschalten erst CSS nachgeladen
+   werden → sichtbares Flackern. Ein Farb-Skin ist ~40 Zeilen (~1 KB);
+   alle gleichzeitig auszuliefern ist billiger als ein Extra-Request.
+
+   Ein Skin ändert AUSSCHLIESSLICH Farben. Ändert eine Idee auch Geometrie,
+   Schriftart oder Effekte, gehört sie in eine eigene Datei — der frühere
+   „Reactor"-Skin war so einer und wurde entfernt.
+   ========================================================================= */
+
+/* ----------  TOKEN-VERTRAG  ----------------------------------------------
+   Diese Token MUSS ein Skin setzen (sonst erbt er die Dark-Werte):
+
+   Flächen      --bg-page --bg-surface --bg-sunken
+   Text         --text-primary --text-secondary --text-tertiary
+   Linien       --border-subtle --border-emphasis
+   Akzente      --accent-primary --accent-secondary --accent-tertiary
+                --accent-tint (zarte Akzentfläche) --accent-solid (gefüllte Controls)
+   Semantik     --warn --danger --dusty-rose (Ausgaben)
+   Auf Akzent   --on-accent (Textfarbe AUF gefüllten Akzentflächen)
+   Tiefe        --shadow-xs --shadow-sm --shadow-md --shadow-lg
+                --overlay --on-overlay --hairline
+   Tints        --ok-tint --err-tint --year-tint
+   Beleg        --receipt-bg --receipt-fg --receipt-line
+                --receipt-surface --receipt-muted --receipt-border
+   Deko         --grain-opacity --glass-fill --glass-shine
+   Footer       --footer-bg --footer-text --footer-head
+
+   Kontrast-Regel: --text-tertiary muss auf --bg-surface mindestens 4.5:1
+   erreichen (kleinste Schrift der App ist 12px). Ebenso --accent-tertiary,
+   --dusty-rose, --warn und --danger — alle vier werden auch als Betrags-TEXT
+   gesetzt, nicht nur als Balkenfüllung.
+
+   Ampel-Regel: --warn und --danger müssen klar UNTERSCHEIDBAR sein. Sie sind
+   die mittlere und die obere Stufe derselben Ampel (.ampel-warn/.ampel-over);
+   liegen sie farblich nah beieinander, hat die Ampel faktisch nur zwei Stufen.
+   Bewährt: --warn bernstein/ocker, --danger rot. --warn darf ausserdem nicht
+   mit --accent-primary zusammenfallen, sonst liest sich jede Markenfläche als
+   Warnung.
+   ------------------------------------------------------------------------ */
+
+
+/* ==========  DARK — Default  ============================================ */
+:root,
+[data-theme="dark"] {
+  /* ----- Diagramm-Palette (erzeugt aus palette.py) ----- */
+  --chart-0: #D97757;
+  --chart-1: #94A475;
+  --chart-2: #C9A66B;
+  --chart-3: #CA6068;
+  --chart-4: #B07D4F;
+  --chart-5: #8C8A6B;
+  --chart-6: #A86B57;
+  --chart-7: #7E9C8B;
+  --chart-0-on: #FFFFFF;
+  --chart-1-on: #FFFFFF;
+  --chart-2-on: #1F1E1B;
+  --chart-3-on: #FFFFFF;
+  --chart-4-on: #FFFFFF;
+  --chart-5-on: #FFFFFF;
+  --chart-6-on: #FFFFFF;
+  --chart-7-on: #FFFFFF;
+  --chart-income: #6E8C5A;
+  --chart-save: #7BA8B8;
+  --chart-reserve: #C26851;
+  /* ----- Ende Diagramm-Palette ----- */
+  --bg-page:        #1A1917;
+  --bg-surface:     #252320;
+  --bg-sunken:      #1F1E1B;
+
+  --text-primary:   #F5F4EE;
+  --text-secondary: #B0AEA5;
+  --text-tertiary:  #8E8B81;  /* 4.60:1 auf Card — WCAG AA für Kleintext */
+
+  --border-subtle:    #2E2C28;
+  --border-emphasis:  #3A3835;
+
+  --accent-primary:   #D97757;  /* Akzent-Orange */
+  --accent-tint:      rgba(217, 119, 87, 0.16);
+  --accent-secondary: #8FB5DC;
+  --accent-tertiary:  #94A475;  /* Grün — auch Betrags-Text (Einnahmen) */
+  /* Bernstein statt bisher #D97757: das war Zeichen für Zeichen --accent-primary
+     UND kaum von --danger zu unterscheiden — die Ampel hatte damit nur zwei
+     sichtbare Stufen. 6.98:1 auf Card. */
+  --warn:             #D9A441;
+  --danger:           #D07A64;  /* 4.9:1 auf Card */
+  --dusty-rose:       #C98C7D;  /* Ausgaben-Beträge */
+  --on-accent:        #1A1917;  /* Text auf gefüllter Akzentfläche */
+
+  /* Tiefe: im Dunkeln trägt Schwarz, im Hellen braucht es weniger. */
+  --shadow-xs:  0 1px 5px rgba(0, 0, 0, 0.30);
+  --shadow-sm:  0 8px 22px rgba(0, 0, 0, 0.20);
+  --shadow-md:  0 12px 28px rgba(0, 0, 0, 0.28);
+  --shadow-lg:  0 18px 50px rgba(0, 0, 0, 0.38);
+  --overlay:    rgba(20, 19, 18, 0.55);
+  --on-overlay: #ECE5D3;   /* Text/Spinner AUF dem Overlay — immer hell */
+  --hairline:   rgba(255, 255, 255, 0.07);
+
+  /* Semantische Flächen-Tints (Erfolg / Fehler / Jahres-Badge) */
+  --ok-tint:    rgba(148, 164, 117, 0.16);
+  --err-tint:   rgba(194, 104, 81, 0.15);
+  --year-tint:  rgba(201, 166, 107, 0.16);
+  --year-fg:    #C9A66B;
+
+  --footer-bg:      #141312;
+  --footer-text:    #B0AEA5;
+  --footer-head:    #F5F4EE;
+
+  --grain-opacity:  0.035;
+  --glass-fill:     rgba(127, 127, 127, 0.05);
+  --glass-shine:    rgba(255, 255, 255, 0.28);
+
+  /* „Quittungspapier" (Beleg-Popup + Scan-Editor) */
+  --receipt-bg:      #1C1B18;
+  --receipt-fg:      #E8E6DC;
+  --receipt-line:    #3A3835;
+  --receipt-surface: #24221E;  /* Eingabefelder/Pillen auf dem Papier */
+  --receipt-muted:   #9A968A;
+  --receipt-border:  #4A473F;
+
+  --shadow-focus: 0 0 0 2px rgba(217, 119, 87, 0.45);
+}
+
+
+/* ==========  LIGHT — Sand auf Cream  ==================================== */
+[data-theme="light"] {
+  /* ----- Diagramm-Palette (erzeugt aus palette.py) ----- */
+  --chart-0: #D25F3A;
+  --chart-1: #79895A;
+  --chart-2: #A27C3B;
+  --chart-3: #CA6068;
+  --chart-4: #A9784C;
+  --chart-5: #868467;
+  --chart-6: #A86B57;
+  --chart-7: #6A8A78;
+  --chart-0-on: #FFFFFF;
+  --chart-1-on: #FFFFFF;
+  --chart-2-on: #FFFFFF;
+  --chart-3-on: #FFFFFF;
+  --chart-4-on: #FFFFFF;
+  --chart-5-on: #FFFFFF;
+  --chart-6-on: #FFFFFF;
+  --chart-7-on: #FFFFFF;
+  --chart-income: #6D8A59;
+  --chart-save: #548A9D;
+  --chart-reserve: #C26851;
+  /* ----- Ende Diagramm-Palette ----- */
+  --bg-page:        #F4F1EA;
+  --bg-surface:     #ECE6DA;
+  --bg-sunken:      #F0EBE1;
+
+  --text-primary:   #1F1E1B;
+  --text-secondary: #5B594F;
+  --text-tertiary:  #68655C;  /* 4.69:1 auf Sand-Card */
+
+  --border-subtle:    #E2DBCC;
+  --border-emphasis:  #D2CAB8;
+
+  --accent-primary:   #A34B30;
+  --accent-tint:      rgba(199, 93, 60, 0.14);
+  --accent-solid:     #B04F30;  /* gefüllte Controls: weisser Text = 5.2:1 */
+  --accent-secondary: #5E86B0;
+  --accent-tertiary:  #596C41;  /* 4.5:1 auf Sand — auch Betrags-Text */
+  /* Tiefes Ocker statt bisher #C75D3C: das erreichte auf Sand nur 3.34:1 (zu
+     wenig für 12px-Text) und lag zugleich dicht an --accent-primary und
+     --danger. Jetzt 5.47:1 und als eigene Stufe erkennbar. */
+  --warn:             #7D5210;
+  --danger:           #A24E3E;
+  --dusty-rose:       #8D5B4D;  /* 4.5:1 auf Sand */
+  --on-accent:        #FFFFFF;
+
+  --shadow-xs:  0 1px 4px rgba(60, 50, 40, 0.16);
+  --shadow-sm:  0 8px 22px rgba(60, 50, 40, 0.12);
+  --shadow-md:  0 12px 28px rgba(60, 50, 40, 0.16);
+  --shadow-lg:  0 18px 50px rgba(60, 50, 40, 0.20);
+  --overlay:    rgba(40, 34, 28, 0.45);
+  --on-overlay: #FCFAF4;
+  --hairline:   rgba(0, 0, 0, 0.08);
+
+  --ok-tint:    rgba(89, 108, 65, 0.14);
+  --err-tint:   rgba(162, 78, 62, 0.12);
+  --year-tint:  rgba(138, 109, 59, 0.14);
+  --year-fg:    #8A6D3B;
+
+  --footer-bg:      #1F1E1B;
+  --footer-text:    #B8B0A2;
+  --footer-head:    #F2EFE7;
+
+  --grain-opacity:  0.02;
+  --glass-fill:     rgba(90, 80, 60, 0.05);
+  --glass-shine:    rgba(255, 255, 255, 0.75);
+
+  --receipt-bg:      #FCFAF4;
+  --receipt-fg:      #33302B;
+  --receipt-line:    #D8D0C0;
+  --receipt-surface: #F3EEDF;
+  --receipt-muted:   #6F6A59;
+  --receipt-border:  #B0A78F;
+}
+
+
+/* ==========  NORD — kühles Blaugrau (Vorlage für eigene Skins)  =========
+   Beispiel dafür, wie wenig ein neues Theme braucht: nur Token, keine
+   Komponenten-Regel. Als Muster zum Kopieren gedacht. */
+[data-theme="nord"] {
+  /* ----- Diagramm-Palette (erzeugt aus palette.py) ----- */
+  --chart-0: #88C0D0;
+  --chart-1: #A3BE8C;
+  --chart-2: #EBCB8B;
+  --chart-3: #81A1C1;
+  --chart-4: #B48EAD;
+  --chart-5: #D08770;
+  --chart-6: #8A85D5;
+  --chart-7: #8FBCBB;
+  --chart-0-on: #1F1E1B;
+  --chart-1-on: #1F1E1B;
+  --chart-2-on: #1F1E1B;
+  --chart-3-on: #FFFFFF;
+  --chart-4-on: #FFFFFF;
+  --chart-5-on: #FFFFFF;
+  --chart-6-on: #FFFFFF;
+  --chart-7-on: #1F1E1B;
+  --chart-income: #A3BE8C;
+  --chart-save: #88C0D0;
+  --chart-reserve: #C8777F;
+  /* ----- Ende Diagramm-Palette ----- */
+  --bg-page:        #2E3440;
+  --bg-surface:     #3B4252;
+  --bg-sunken:      #343B48;
+
+  --text-primary:   #ECEFF4;
+  --text-secondary: #C3CAD6;
+  /* War #9AA3B2 mit dem Kommentar „4.6:1" — nachgemessen sind es 3.96:1 und
+     damit unter der Vertragsgrenze. #ADB5C2 erreicht 4.87:1. */
+  --text-tertiary:  #ADB5C2;
+
+  --border-subtle:    #434C5E;
+  --border-emphasis:  #4C566A;
+
+  --accent-primary:   #88C0D0;
+  --accent-tint:      rgba(136, 192, 208, 0.16);
+  --accent-secondary: #81A1C1;
+  --accent-tertiary:  #A3BE8C;
+  --warn:             #EBCB8B;
+  /* Nord-Aurora #D08770 erreicht auf --bg-surface nur 3.54:1. Als Balkenfarbe
+     genügte das, als Betrags-Text nicht — deshalb eine Stufe heller. 4.89:1. */
+  --danger:           #E5A692;
+  --dusty-rose:       #D8A48F;
+  --on-accent:        #2E3440;
+
+  --shadow-xs:  0 1px 5px rgba(0, 0, 0, 0.32);
+  --shadow-sm:  0 8px 22px rgba(0, 0, 0, 0.22);
+  --shadow-md:  0 12px 28px rgba(0, 0, 0, 0.30);
+  --shadow-lg:  0 18px 50px rgba(0, 0, 0, 0.40);
+  --overlay:    rgba(30, 35, 45, 0.60);
+  --on-overlay: #ECEFF4;
+  --hairline:   rgba(255, 255, 255, 0.08);
+
+  --ok-tint:    rgba(163, 190, 140, 0.16);
+  --err-tint:   rgba(208, 135, 112, 0.16);
+  --year-tint:  rgba(235, 203, 139, 0.16);
+  --year-fg:    #EBCB8B;
+
+  --footer-bg:      #272C36;
+  --footer-text:    #C3CAD6;
+  --footer-head:    #ECEFF4;
+
+  --grain-opacity:  0;
+  --glass-fill:     rgba(200, 210, 230, 0.05);
+  --glass-shine:    rgba(255, 255, 255, 0.22);
+
+  --receipt-bg:      #292E39;
+  --receipt-fg:      #E5E9F0;
+  --receipt-line:    #434C5E;
+  --receipt-surface: #333A47;
+  --receipt-muted:   #9AA3B2;
+  --receipt-border:  #4C566A;
+
+  --shadow-focus: 0 0 0 2px rgba(136, 192, 208, 0.45);
+}
+
+
+/* ==========  SYNTHWAYE  ================================================== */
+/* Synthwave '84: Neon auf Violett-Nacht. Der auffälligste der drei Skins —
+   Pink als Marke, Cyan als Zweitakzent, giftgrün für Einnahmen. `--danger`
+   wurde von #FE4450 auf #FF5A64 aufgehellt: das Original erreichte auf der
+   Kartenfläche nur 4.48:1 und verfehlte den Kontrast-Vertrag knapp. */
+[data-theme="synthwave"] {
+  /* ----- Diagramm-Palette (erzeugt aus palette.py) ----- */
+  --chart-0: #FF7EDB;
+  --chart-1: #72F1B8;
+  --chart-2: #FEDE5D;
+  --chart-3: #36F9F6;
+  --chart-4: #B893CE;
+  --chart-5: #FF8B39;
+  --chart-6: #FE4450;
+  --chart-7: #848BBD;
+  --chart-0-on: #1F1E1B;
+  --chart-1-on: #1F1E1B;
+  --chart-2-on: #1F1E1B;
+  --chart-3-on: #1F1E1B;
+  --chart-4-on: #1F1E1B;
+  --chart-5-on: #1F1E1B;
+  --chart-6-on: #FFFFFF;
+  --chart-7-on: #FFFFFF;
+  --chart-income: #72F1B8;
+  --chart-save: #36F9F6;
+  --chart-reserve: #FE4450;
+  /* ----- Ende Diagramm-Palette ----- */
+  --bg-page:        #262335;
+  --bg-surface:     #2A2139;
+  --bg-sunken:      #241B2F;
+
+  --text-primary:   #F8F8F2;
+  --text-secondary: #C7C0DB;
+  --text-tertiary:  #9A8FBF;
+
+  --border-subtle:    #362B4A;
+  --border-emphasis:  #463465;
+
+  --accent-primary:   #FF7EDB;
+  --accent-tint:      rgba(255, 126, 219, 0.16);
+  --accent-solid:     #D94FB0;
+  --accent-secondary: #36F9F6;
+  --accent-tertiary:  #72F1B8;
+  --warn:             #FEDE5D;
+  --danger:           #FF5A64;
+  --dusty-rose:       #FF8B39;
+  --on-accent:        #1B142A;
+
+  --shadow-xs:  0 1px 5px rgba(0, 0, 0, 0.40);
+  --shadow-sm:  0 8px 22px rgba(0, 0, 0, 0.30);
+  --shadow-md:  0 12px 28px rgba(0, 0, 0, 0.38);
+  --shadow-lg:  0 18px 50px rgba(0, 0, 0, 0.48);
+  --overlay:    rgba(20, 14, 32, 0.62);
+  --on-overlay: #F8F8F2;
+  --hairline:   rgba(255, 255, 255, 0.09);
+
+  --ok-tint:    rgba(114, 241, 184, 0.14);
+  --err-tint:   rgba(255, 90, 100, 0.15);
+  --year-tint:  rgba(254, 222, 93, 0.14);
+  --year-fg:    #FEDE5D;
+
+  --footer-bg:      #1E1A2B;
+  --footer-text:    #C7C0DB;
+  --footer-head:    #F8F8F2;
+
+  --grain-opacity:  0.03;
+  --glass-fill:     rgba(255, 126, 219, 0.06);
+  --glass-shine:    rgba(54, 249, 246, 0.30);
+
+  --receipt-bg:      #241B2F;
+  --receipt-fg:      #EFE9F7;
+  --receipt-line:    #463465;
+  --receipt-surface: #2E2440;
+  --receipt-muted:   #A99BC5;
+  --receipt-border:  #5A4480;
+
+  --shadow-focus: 0 0 0 2px rgba(54, 249, 246, 0.45);
+}
+
+
+/* ==========  AYU HELL  ================================================== */
+/* Ayu Light: sehr helles, sachliches Grau-Weiss mit Orange. Die Original-
+   Akzente sind für Fliesstext zu hell (Grün #86B300 kam auf 2.3:1) — Grün,
+   Amber und Rot sind darum abgedunkelt. Das Orange bleibt als Markenfarbe,
+   für gefüllte Flächen gibt es --accent-solid. */
+[data-theme="ayu-hell"] {
+  /* ----- Diagramm-Palette (erzeugt aus palette.py) ----- */
+  --chart-0: #E66406;
+  --chart-1: #719700;
+  --chart-2: #C47B0E;
+  --chart-3: #1E91E3;
+  --chart-4: #A37ACC;
+  --chart-5: #389B7A;
+  --chart-6: #EE5A5A;
+  --chart-7: #2F95B8;
+  --chart-0-on: #FFFFFF;
+  --chart-1-on: #FFFFFF;
+  --chart-2-on: #FFFFFF;
+  --chart-3-on: #FFFFFF;
+  --chart-4-on: #FFFFFF;
+  --chart-5-on: #FFFFFF;
+  --chart-6-on: #FFFFFF;
+  --chart-7-on: #FFFFFF;
+  --chart-income: #719700;
+  --chart-save: #1E91E3;
+  --chart-reserve: #EE5A5A;
+  /* ----- Ende Diagramm-Palette ----- */
+  --bg-page:        #FCFCFC;
+  --bg-surface:     #F3F4F5;
+  --bg-sunken:      #F7F8F9;
+
+  --text-primary:   #454A4F;
+  --text-secondary: #5C6166;
+  --text-tertiary:  #6B7075;
+
+  --border-subtle:    #E7E9EB;
+  --border-emphasis:  #D3D6DA;
+
+  --accent-primary:   #C2620F;
+  --accent-tint:      rgba(250, 141, 62, 0.16);
+  --accent-solid:     #C2620F;
+  --accent-secondary: #2A6FA8;
+  --accent-tertiary:  #587500;
+  --warn:             #8A5A00;
+  --danger:           #C03A3A;
+  --dusty-rose:       #A85A3C;
+  --on-accent:        #FFFFFF;
+
+  --shadow-xs:  0 1px 4px rgba(60, 65, 70, 0.12);
+  --shadow-sm:  0 8px 22px rgba(60, 65, 70, 0.10);
+  --shadow-md:  0 12px 28px rgba(60, 65, 70, 0.14);
+  --shadow-lg:  0 18px 50px rgba(60, 65, 70, 0.18);
+  --overlay:    rgba(40, 44, 48, 0.42);
+  --on-overlay: #FCFCFC;
+  --hairline:   rgba(0, 0, 0, 0.07);
+
+  --ok-tint:    rgba(92, 122, 0, 0.12);
+  --err-tint:   rgba(192, 58, 58, 0.10);
+  --year-tint:  rgba(138, 90, 0, 0.12);
+  --year-fg:    #8A5A00;
+
+  --footer-bg:      #2B3038;
+  --footer-text:    #B9BEC4;
+  --footer-head:    #F3F4F5;
+
+  --grain-opacity:  0.015;
+  --glass-fill:     rgba(90, 95, 100, 0.05);
+  --glass-shine:    rgba(255, 255, 255, 0.80);
+
+  --receipt-bg:      #FFFFFF;
+  --receipt-fg:      #3A3F44;
+  --receipt-line:    #DFE2E5;
+  --receipt-surface: #F5F6F7;
+  --receipt-muted:   #6B7075;
+  --receipt-border:  #C4C8CC;
+}
+
+
+/* ==========  MELANGE DUNKEL  ============================================ */
+/* Melange: warmes, gedecktes Braun-Beige — der ruhigste der drei. Drei Töne
+   weichen bewusst vom Original ab, alle drei vom Kontrast-Test erzwungen:
+   `--danger` (#D47766 kam auf 4.13:1) und `--text-tertiary` (#A98A78, 4.11:1)
+   sind aufgehellt; `--warn` war als Honigton nur ΔE 16 vom Sand-Akzent entfernt
+   und damit kaum als Warnung erkennbar — jetzt Gold (ΔE 34). */
+[data-theme="melange"] {
+  /* ----- Diagramm-Palette (erzeugt aus palette.py) ----- */
+  --chart-0: #EBB481;
+  --chart-1: #85B695;
+  --chart-2: #EBC06D;
+  --chart-3: #A3A9CE;
+  --chart-4: #CF9BC2;
+  --chart-5: #89B3B6;
+  --chart-6: #D47766;
+  --chart-7: #A98A78;
+  --chart-0-on: #1F1E1B;
+  --chart-1-on: #1F1E1B;
+  --chart-2-on: #1F1E1B;
+  --chart-3-on: #1F1E1B;
+  --chart-4-on: #1F1E1B;
+  --chart-5-on: #1F1E1B;
+  --chart-6-on: #FFFFFF;
+  --chart-7-on: #FFFFFF;
+  --chart-income: #85B695;
+  --chart-save: #A3A9CE;
+  --chart-reserve: #D47766;
+  /* ----- Ende Diagramm-Palette ----- */
+  --bg-page:        #292522;
+  --bg-surface:     #34302C;
+  --bg-sunken:      #2E2A26;
+
+  --text-primary:   #ECE1D7;
+  --text-secondary: #D3C0AC;
+  --text-tertiary:  #BC9E8A;
+
+  --border-subtle:    #3A352F;
+  --border-emphasis:  #4A443C;
+
+  --accent-primary:   #EBB481;
+  --accent-tint:      rgba(235, 180, 129, 0.16);
+  --accent-solid:     #C98F5E;
+  --accent-secondary: #A3A9CE;
+  --accent-tertiary:  #85B695;
+  --warn:             #D9C74F;
+  --danger:           #E08D7C;
+  --dusty-rose:       #CF9BC2;
+  --on-accent:        #292522;
+
+  --shadow-xs:  0 1px 5px rgba(0, 0, 0, 0.28);
+  --shadow-sm:  0 8px 22px rgba(0, 0, 0, 0.20);
+  --shadow-md:  0 12px 28px rgba(0, 0, 0, 0.26);
+  --shadow-lg:  0 18px 50px rgba(0, 0, 0, 0.36);
+  --overlay:    rgba(25, 21, 18, 0.58);
+  --on-overlay: #ECE1D7;
+  --hairline:   rgba(255, 255, 255, 0.07);
+
+  --ok-tint:    rgba(133, 182, 149, 0.14);
+  --err-tint:   rgba(224, 141, 124, 0.14);
+  --year-tint:  rgba(217, 199, 79, 0.14);
+  --year-fg:    #D9C74F;
+
+  --footer-bg:      #211E1B;
+  --footer-text:    #D3C0AC;
+  --footer-head:    #ECE1D7;
+
+  --grain-opacity:  0.04;
+  --glass-fill:     rgba(235, 180, 129, 0.05);
+  --glass-shine:    rgba(255, 245, 235, 0.26);
+
+  --receipt-bg:      #2E2A26;
+  --receipt-fg:      #ECE1D7;
+  --receipt-line:    #4A443C;
+  --receipt-surface: #383430;
+  --receipt-muted:   #BC9E8A;
+  --receipt-border:  #5A5248;
+
+  --shadow-focus: 0 0 0 2px rgba(235, 180, 129, 0.45);
+}

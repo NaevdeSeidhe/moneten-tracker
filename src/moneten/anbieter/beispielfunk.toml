@@ -1,0 +1,74 @@
+# Beispielprofil: eine Monatsrechnung mit einzeln aufgeschlüsselten Positionen.
+#
+# Diese Datei ist ERFUNDEN und dient zwei Zwecken: sie zeigt, wie ein Profil
+# aussieht, und die Tests laufen an ihr. Für einen echten Anbieter legt man eine
+# eigene Datei in den Ordner aus MONETEN_ANBIETER_DIR (standardmässig
+# `data/anbieter`) — dort liegt sie bei den Daten und nicht beim Programm.
+#
+# Erwartet wird SPALTENTEXT: je Tabellenzeile eine Textzeile, die Zellen durch
+# Tabulator getrennt. Der Grund ist gemessen — „Paket S 1 5.00 5.00" und
+# „Rabatt Paket S 1 -5.00" sehen in der Lesereihenfolge gleich aus und meinen
+# Verschiedenes. Mit Spalten ist die letzte Zelle immer der Betrag.
+
+slug = "beispielfunk"
+# Woran der Anbieter im Belegtext erkannt wird (klein geschrieben).
+stichwort = "beispielfunk"
+name = "Beispielfunk AG"
+
+# Ab hier stehen die Positionen. Alles davor ist Kopf und Kostenübersicht — und
+# die Kostenübersicht wiederholt dieselben Beträge als Gruppensummen. Ohne
+# diesen Anker zählte jede Rechnung ihre Abonnemente doppelt.
+anker = "Positionen im Detail"
+
+# Abschnitte, unter denen Positionen stehen. Ihre Kopfzeile trägt selbst eine
+# Zwischensumme und wird deshalb übersprungen.
+abschnitte = [
+    "Grundgebühren",
+    "Zusatzleistungen",
+    "Verbrauch",
+]
+
+# Zeilenanfänge, die einen Abschnitt beenden. Entscheidend sind die Blöcke, die
+# bereits gezählte Positionen ein zweites Mal aufschlüsseln — ohne Sperre stünde
+# jede davon zweimal in der Summe und die Selbstprüfung schlüge fehl.
+ende = [
+    "Summe",
+    "Vertrag",
+    "Zusammenfassung",
+    "Aufstellung nach Ziel",
+    "Rundungsdifferenz",
+    "Rechnungstotal",
+    "Positionen im Detail",
+    "Adresse",
+    "Menge",
+]
+
+# Wie weit die Summe der Positionen vom Rechnungsbetrag abweichen darf, bevor
+# der Wert als unplausibel gilt.
+# Kategorie, in der die Zahlungen an diesen Anbieter gebucht sein sollten.
+# Sie verknuepft die Verlaufsreihe mit dem Soll/Ist-Abgleich.
+kategorie = "Handy-Abo"
+notiz = "Monatsrechnung mit allen Positionen — Grundgebühren, Zusatzleistungen und Rabatte."
+
+toleranz = "5"
+
+[muster]
+# Rechnungskopf. GENAU zwei Klammergruppen: Monatsname, Jahr.
+monat = "Rechnung für\\s+([A-Za-zäöüÄÖÜ]+)\\s+(\\d{4})"
+
+# Der Rechnungsbetrag. GENAU eine Klammergruppe: der Betrag.
+# Zusammen mit `monat` ist dieses Muster auch die Erkennung: fehlt eines von
+# beiden, ist es keine Rechnung, sondern zum Beispiel ein Nutzungsnachweis —
+# der weist fast durchgehend 0.00 aus und gehört in keine Kostenreihe.
+total = "Rechnungstotal inkl\\.\\s*MWST\\s+(-?[\\d'’´.]+)"
+
+# Ausgewiesene Rundungsdifferenz. Optional; eine Klammergruppe.
+# Sie ist KEINE Position — sie entsteht erst beim Runden auf fünf Rappen.
+rundung = "Rundungsdifferenz\\s+(-?[\\d'’´.]+)"
+
+# Laufender Zähler am Ende eines Positionsnamens, der entfernt wird: aus
+# „Rabatt Paket L (10/12)" wird „Rabatt Paket L". OHNE Klammergruppe.
+# Bliebe er stehen, entstünde für dieselbe Position in jedem Monat ein neuer
+# Posten, und ein gestapelter Balken zeigte ein Dutzend Einmal-Erscheinungen
+# statt einer durchgehenden Fläche.
+laufzeit = "\\s*\\(\\d+/\\d+\\)$"

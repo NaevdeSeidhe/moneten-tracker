@@ -1,0 +1,126 @@
+{% extends "_shell.html" %}
+{% block title %}Vergleich — Moneten-Tracker{% endblock %}
+
+{% macro delta_pill(value, more_is_bad=true) %}
+  {# Farbiges Δ: bei Ausgaben ist „mehr" schlecht (rot), „weniger" gut (grün). #}
+  {% if value == 0 %}
+    <span class="muted mono">±0</span>
+  {% else %}
+    {% set good = (value < 0) if more_is_bad else (value > 0) %}
+    <span class="mono" style="color:{{ 'var(--accent-tertiary)' if good else 'var(--dusty-rose)' }}">
+      {{ '+' if value > 0 else '−' }}{{ value.copy_abs() | chf }}
+    </span>
+  {% endif %}
+{% endmacro %}
+
+{% block content %}
+<div class="hero">
+  <div>
+    <h1 class="hero-greeting">Vergleich</h1>
+  </div>
+</div>
+
+{# ----------  Monat vs. Vormonat  ---------- #}
+<div class="card mb-4">
+  {# Der Vormonat ist am selben Monatstag abgeschnitten. Steht das nicht da, liest
+     man seinen gekürzten Wert als Einbruch — genau der Fehlschluss, den der
+     Stichtag verhindert. #}
+  <div class="label-cap card-head flex items-center justify-between" style="flex-wrap:wrap;gap:2px 12px">
+    <span>Dieser Monat vs. Vormonat</span>
+    <span class="cmp-stichtag muted text-sm">beide bis zum {{ stichtag_tag }}</span>
+  </div>
+  {% if not month_cur.income and not month_cur.expense %}
+    {# S4: Ohne diesen Satz sieht ein noch leerer Monat nach Totalausfall aus. #}
+    <div class="muted text-sm" style="margin-bottom:12px">Der laufende Monat hat noch keine Buchungen.</div>
+  {% endif %}
+  <div class="budget-summary">
+    <div class="bs-cell">
+      <div class="metric-label">Einnahmen</div>
+      <div class="metric-value" style="color:var(--accent-tertiary)">{{ month_cur.income | chf }}</div>
+      <div class="metric-note">Vormonat {{ month_prev.income | chf }} · {{ delta_pill(month_cur.income - month_prev.income, more_is_bad=false) }}</div>
+    </div>
+    <div class="bs-cell">
+      <div class="metric-label">Ausgaben</div>
+      <div class="metric-value" style="color:var(--dusty-rose)">{{ month_cur.expense | chf }}</div>
+      <div class="metric-note">Vormonat {{ month_prev.expense | chf }} · {{ delta_pill(month_cur.expense - month_prev.expense, more_is_bad=true) }}</div>
+    </div>
+    <div class="bs-cell">
+      <div class="metric-label">Saldo</div>
+      <div class="metric-value" style="color:{{ 'var(--accent-tertiary)' if month_cur.saldo >= 0 else 'var(--danger)' }}">{{ month_cur.saldo | chf }}</div>
+      <div class="metric-note">Vormonat {{ month_prev.saldo | chf }} · {{ delta_pill(month_cur.saldo - month_prev.saldo, more_is_bad=false) }}</div>
+    </div>
+  </div>
+
+  {% if month_cats %}
+    <div class="flex items-center justify-between" style="margin:20px 0 10px;flex-wrap:wrap;gap:8px">
+      <div class="label-cap" style="font-size:14px">Ausgaben je Kategorie</div>
+      {# Die Legende nannte „Dieser Monat" pauschal altrosa — der Balken ist aber
+         grün, sobald weniger ausgegeben wurde als im Vormonat. Sie stimmte damit
+         in der Hälfte der Fälle nicht. Jetzt benennt sie, wofür die Farben
+         wirklich stehen. #}
+      <div class="cmp-legend">
+        <span><span class="cmp-key cur"></span>mehr als im Vormonat</span>
+        <span><span class="cmp-key good"></span>weniger</span>
+        <span><span class="cmp-key prev"></span>Vormonat</span>
+      </div>
+    </div>
+    <div class="cmp-list">
+      {% for c in month_cats %}
+        {% set worse = c.delta > 0 %}
+        <div class="cmp-row">
+          <span class="cmp-ico">{{ icon(c.icon) }}</span>
+          <span class="cmp-name">{{ c.name }}</span>
+          <span class="cmp-bars">
+            {# B13: bei 0 keinen Mini-Stummel zeigen (min-width des Fills sah aus wie ein Fehler). #}
+            <span class="cmp-bar">{% if c.cur_pct %}<span class="cmp-fill {{ 'bad' if worse else 'good' }}" style="width:{{ c.cur_pct }}%"></span>{% endif %}</span>
+            <span class="cmp-bar">{% if c.prev_pct %}<span class="cmp-fill prev" style="width:{{ c.prev_pct }}%"></span>{% endif %}</span>
+          </span>
+          <span class="cmp-vals">
+            <span class="mono cmp-cur">{{ c.cur | chf }}</span>
+            {{ delta_pill(c.delta, more_is_bad=true) }}
+          </span>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="muted text-sm" style="padding:12px 0">Noch keine Ausgaben in diesen Monaten.</div>
+  {% endif %}
+</div>
+
+{# ----------  Jahr vs. Vorjahr  ----------
+   Als Balkenpaar statt als drei Textkacheln: „2026: 66'000 / 2025: 61'200" muss
+   man im Kopf vergleichen, zwei Balken nebeneinander sieht man. Skaliert wird je
+   Zeile auf den grösseren der beiden Werte, damit der Unterschied ablesbar ist. #}
+<div class="card">
+  <div class="label-cap card-head flex items-center justify-between" style="flex-wrap:wrap;gap:2px 12px">
+    <span>{{ year_cur_label }} vs. {{ year_prev_label }}</span>
+    <span class="cmp-stichtag muted text-sm">beide bis zum {{ stichtag_label }}</span>
+  </div>
+  <div class="cmp-legend" style="margin-bottom:14px">
+    <span><span class="cmp-key cur"></span>{{ year_cur_label }}</span>
+    <span><span class="cmp-key prev"></span>{{ year_prev_label }}</span>
+  </div>
+  {% for zeile in [
+      ("Einnahmen", year_cur.income, year_prev.income, false),
+      ("Ausgaben",  year_cur.expense, year_prev.expense, true),
+      ("Saldo",     year_cur.saldo,  year_prev.saldo,  false)] %}
+    {% set titel = zeile[0] %}{% set jetzt = zeile[1] %}{% set davor = zeile[2] %}{% set mehr_ist_schlecht = zeile[3] %}
+    {% set spitze = (jetzt if jetzt > davor else davor) %}
+    {% set spitze = spitze if spitze > 0 else 1 %}
+    <div class="jahr-zeile">
+      <div class="jahr-kopf">
+        <span class="label-cap" style="font-size:var(--fs-xs)">{{ titel }}</span>
+        {{ delta_pill(jetzt - davor, more_is_bad=mehr_ist_schlecht) }}
+      </div>
+      <div class="jahr-bar">
+        <span class="jahr-fill cur" style="width:{{ ((jetzt / spitze * 100) | round(1)) if jetzt > 0 else 0 }}%"></span>
+        <span class="jahr-wert mono">{{ jetzt | chf }}</span>
+      </div>
+      <div class="jahr-bar">
+        <span class="jahr-fill prev" style="width:{{ ((davor / spitze * 100) | round(1)) if davor > 0 else 0 }}%"></span>
+        <span class="jahr-wert mono muted">{{ davor | chf }}</span>
+      </div>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}
