@@ -3,6 +3,12 @@
 Grobe Übersicht, eine Zeile je Sache. Die ausführliche Entwicklungs-Historie
 gehört nicht hierher.
 
+## 0.82.3
+
+- Die Anmeldeseite nennt keine eingerichteten Passkeys mehr
+- Neue Passkeys werden auffindbar abgelegt (bestehende einmal neu anlegen)
+- Update-Anleitung: Herkunft des Abbilds prueflich mit `gh attestation verify`
+
 ## 0.82.2
 
 - Haengende Beleg-Erkennungen blockieren keine Plaetze mehr

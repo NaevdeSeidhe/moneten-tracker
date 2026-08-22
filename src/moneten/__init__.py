@@ -4,4 +4,4 @@ Dieses Paket bündelt sämtlichen Code der App. Einstiegspunkt ist
 ``moneten.main:app`` (eine FastAPI-Instanz), die per Uvicorn ausgeliefert wird.
 """
 
-__version__ = "0.82.2"
+__version__ = "0.82.3"

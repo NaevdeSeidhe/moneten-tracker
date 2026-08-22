@@ -116,6 +116,19 @@ docker compose pull
 docker compose up -d
 ```
 
+**Optional, aber empfohlen: vor dem Neustart die Herkunft prüfen.** Der Befehl
+beantwortet die Frage, gegen die sonst nur Vertrauen hilft — stammt das gerade
+geladene Abbild wirklich aus diesem Quelltext?
+
+```bash
+gh attestation verify oci://ghcr.io/<konto>/moneten-tracker:latest --owner <konto>
+```
+
+Er braucht das GitHub-CLI (`gh`) und funktioniert ohne Anmeldung. Kommt kein
+grüner Haken, dann **nicht** starten: dann ist das Abbild nicht das, was dieser
+Quelltext beschreibt. Das ist der Grund, warum die Marke `latest` hier bleiben
+darf — man kann sie prüfen, statt sich auf sie zu verlassen.
+
 Das war es. Deine Daten liegen im Ordner `data/` neben der Compose-Datei und
 werden nicht angefasst; ausstehende Datenbank-Änderungen zieht der Container
 beim Start selbst nach. Auf einem Synology-NAS geht dasselbe ohne Konsole:

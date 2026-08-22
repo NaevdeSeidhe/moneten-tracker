@@ -146,3 +146,36 @@ def test_eine_anmelde_challenge_taugt_nicht_zum_anlegen(logged_in_client: TestCl
         "die PIN-Pflicht beim Anlegen ist damit wirkungslos."
     )
     assert c.get("/auth/webauthn/registered").json() == {"count": 0}
+
+
+def test_die_anmeldeseite_verraet_keine_schluessel(logged_in_client: TestClient) -> None:
+    """Die Zusage, um die es geht — und zwar MIT eingerichtetem Passkey.
+
+    Der frühere Test prüfte nur den leeren Fall; die Antwort ohne Passkey ist
+    aber gar nicht die interessante. Verraten wurde etwas erst, wenn welche da
+    sind: Anzahl der Geräte und stabile Kennungen, für jeden, der die
+    Anmeldeseite erreicht — ohne Anmeldung, ohne PIN.
+    """
+    c = logged_in_client
+    begin = c.post("/auth/webauthn/register/begin", json={"pin": PIN})
+    c.post("/auth/webauthn/register/complete", json=_mach_credential(begin.json()["challenge"]))
+    assert c.get("/auth/webauthn/registered").json() == {"count": 1}, "Aufbau missglückt"
+
+    antwort = c.post("/auth/webauthn/authenticate/begin")
+    assert antwort.status_code == 200, antwort.text
+    daten = antwort.json()
+    assert not daten.get("allowCredentials"), (
+        f"Die Anmeldeseite nennt die eingerichteten Schlüssel: {daten.get('allowCredentials')}"
+    )
+    assert daten["userVerification"] == "required"
+
+
+def test_neue_schluessel_muessen_auffindbar_sein(logged_in_client: TestClient) -> None:
+    """Ohne Liste findet das Gerät nur einen auffindbar abgelegten Schlüssel.
+
+    Wäre das nur „bevorzugt", entstünde womöglich einer, mit dem sich die App
+    später nicht anmelden kann — und das merkt man erst am Gerät.
+    """
+    daten = logged_in_client.post("/auth/webauthn/register/begin", json={"pin": PIN}).json()
+    assert daten["authenticatorSelection"]["residentKey"] == "required", daten
+    assert daten["authenticatorSelection"]["userVerification"] == "required", daten

@@ -190,7 +190,15 @@ async def register_begin(
         # Hand. Der Passkey ersetzt hier die PIN vollständig; dafür muss das
         # Gerät den Menschen davor erkennen (Fingerabdruck, Gesicht, Geräte-PIN).
         authenticator_selection=AuthenticatorSelectionCriteria(
-            resident_key=ResidentKeyRequirement.PREFERRED,
+            # REQUIRED und nicht PREFERRED: nur ein auffindbar abgelegter
+            # Schluessel wird ohne Liste gefunden — und ohne Liste kommt die
+            # Anmeldeseite aus, siehe :func:`authenticate_begin`. Waere er nur
+            # „bevorzugt", entstuende womoeglich einer, mit dem sich die App
+            # spaeter nicht anmelden kann; das merkt man erst am Geraet.
+            #
+            # Der Preis: aeltere USB-Sicherheitsschluessel ohne Speicher lehnen
+            # das ab. Fuer Handy und Windows Hello ist es der Normalfall.
+            resident_key=ResidentKeyRequirement.REQUIRED,
             user_verification=UserVerificationRequirement.REQUIRED,
         ),
         exclude_credentials=[
@@ -272,13 +280,17 @@ async def authenticate_begin(
         )
     fehlversuch_merken(wer)
 
-    user = _single_user(db)
-    creds = _load_credentials(user) if user else []
+    # **Ohne Liste erlaubter Schluessel.** Sie stand hier, weil ein Geraet einen
+    # nicht auffindbar abgelegten Schluessel sonst nicht findet. Sie verriet aber
+    # jedem, der die Anmeldeseite erreicht, WIE VIELE Geraete eingerichtet sind
+    # und unter welchen stabilen Kennungen — ohne dass er sich anmelden muesste.
+    #
+    # Seit die Registrierung auffindbare Schluessel verlangt
+    # (``ResidentKeyRequirement.REQUIRED``), findet das Geraet seinen Schluessel
+    # selbst. Wer noch einen aelteren, nicht auffindbaren hat, legt ihn einmal
+    # neu an; hinein kommt er in der Zwischenzeit ueber die PIN.
     options = generate_authentication_options(
         rp_id=_rp_id(request),
-        allow_credentials=[
-            PublicKeyCredentialDescriptor(id=base64url_to_bytes(c["id"])) for c in creds
-        ],
         user_verification=UserVerificationRequirement.REQUIRED,
     )
     resp = Response(content=options_to_json(options), media_type="application/json")
